@@ -1,4 +1,4 @@
-# GwAu3 Factions Leveler V2
+# GwAu3 Factions Leveler
 
 AutoIt3 conversion of the Py4GW **Factions Character Leveler**. The original widget was developed by **Apo** and **Wick** (Divinus) for [Py4GW](https://github.com/apoguita/Py4GW_Reforged). This script is a complete conversion of that route into GwAu3: Shing Jea through the post-20 unlocks, ending at the optional Great Temple secondary-profession trainers.
 
