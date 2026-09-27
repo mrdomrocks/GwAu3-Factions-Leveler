@@ -27,7 +27,7 @@ Quest coordinates, dialog ids, and step order follow `Widgets/Automation/Bots/Le
 | `Leveler_Status.au3` | Progress flags and the GUI status check |
 | `Leveler_Steps.au3` | Step dispatcher and campaign runners |
 
-Lives in the GwAu3 checkout at `Scripts/GwAu3-Factions-Leveler-V2/`. The main script includes `../../API/_GwAu3.au3` and the Pathfinder plugin.
+Lives in the GwAu3 checkout at `Scripts/GwAu3-Factions-Leveler`. The main script includes `../../API/_GwAu3.au3` and the Pathfinder plugin.
 
 ## Run
 
