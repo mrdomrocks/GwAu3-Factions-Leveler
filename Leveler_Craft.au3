@@ -27,6 +27,7 @@ Func Leveler_CountModel($a_i_Model, $a_b_IncludeStorage = True)
 	Return $l_i_Count
 EndFunc
 
+; How many of this model are in Xunlai, not in the bags.
 Func Leveler_CountStorageModel($a_i_Model)
 	Local $l_i_Bags = Leveler_CountModel($a_i_Model, False)
 	Local $l_i_All = Leveler_CountModel($a_i_Model, True)
@@ -34,10 +35,12 @@ Func Leveler_CountStorageModel($a_i_Model)
 	Return $l_i_All - $l_i_Bags
 EndFunc
 
+; Print character and storage gold with a short label.
 Func Leveler_LogGold($a_s_When)
 	Out("[Craft] Gold " & $a_s_When & ": character " & Item_GetInventoryInfo("GoldCharacter") & ", storage " & Item_GetInventoryInfo("GoldStorage"))
 EndFunc
 
+; Gold the open trader quote is asking for, or 0 if no quote is up.
 Func Leveler_TraderQuoteCost()
 	If $g_f_TraderCostValue = 0 Then Return 0
 	Return Memory_Read($g_f_TraderCostValue, "dword")
@@ -179,6 +182,7 @@ EndFunc
 #EndRegion Inventory
 
 #Region Weapon
+; Open Xunlai, pull weapon mats, and make sure character gold can cover the craft.
 Func Leveler_PrepareCraftWeaponFunds()
 	Leveler_LogGold("before Craft Weapon")
 	If Not Leveler_OpenXunlaiStorage() Then
@@ -413,6 +417,7 @@ EndFunc
 #EndRegion Weapon
 
 #Region Monastery Armor
+; Monastery armor pieces for the primary: item id, material model, quantity.
 Func Leveler_GetMonasteryPieces()
 	Local $l_i_Prof = Leveler_PrimaryProfession()
 	Local $l_ai_Pieces[5][3]
@@ -729,6 +734,7 @@ EndFunc
 #EndRegion Monastery Armor
 
 #Region Seitung Armor
+; Seitung armor pieces for the primary: item id, material model, quantity.
 Func Leveler_GetSeitungPieces()
 	Local $l_i_Prof = Leveler_PrimaryProfession()
 	Local $l_ai_Pieces[5][3]
@@ -1078,6 +1084,7 @@ EndFunc
 #EndRegion Seitung Armor
 
 #Region Max Armor
+; Max armor pieces for the primary: item id and the two material costs.
 Func Leveler_GetMaxArmorPieces()
 	Local $l_i_Prof = Leveler_PrimaryProfession()
 	Local $l_ai_Pieces[5][5]

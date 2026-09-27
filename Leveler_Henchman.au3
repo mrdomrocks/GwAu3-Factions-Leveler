@@ -22,6 +22,7 @@ Func Leveler_FormingPartyHenchIDs()
 	Return $l_ai_Hench
 EndFunc
 
+; Preferred henchman slot list for this map. Slots are 1-based party-window ids.
 Func Leveler_HenchmenForMap($a_i_Map = 0)
 	If $a_i_Map = 0 Then $a_i_Map = Map_GetMapID()
 	Local $l_i_Max = Map_GetCurrentAreaInfo("MaxPartySize")
@@ -112,6 +113,7 @@ Func Leveler_AddHenchmanList(ByRef $a_ai_Hench)
 	Return True
 EndFunc
 
+; True when Forming A Party already has its three henchmen.
 Func Leveler_HasFormingPartyHenchmen()
 	Return Leveler_HenchmanCount() >= 3
 EndFunc

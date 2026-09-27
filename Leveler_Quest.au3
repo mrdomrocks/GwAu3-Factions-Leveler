@@ -53,7 +53,8 @@ Func Leveler_QuestLoop($a_i_QuestID, $a_f_X, $a_f_Y, $a_i_Dialog, $a_s_Mode = "a
 		EndIf
 		$l_b_Talked = True
 
-		If $a_i_QuestID <> 0 Then Quest_RequestInfos($a_i_QuestID)
+		; RequestInfos on a quest that just left the log crashes the client.
+		If $a_i_QuestID <> 0 And Leveler_HasQuest($a_i_QuestID) Then Quest_RequestInfos($a_i_QuestID)
 		If Leveler_WaitQuestResult($a_i_QuestID, $a_s_Mode, $a_i_NpcModel, $l_i_StartMap, 4000, $l_b_HadQuest) Then ExitLoop
 	Next
 
@@ -99,10 +100,6 @@ Func Leveler_QuestTalk($a_f_X, $a_f_Y, $a_i_QuestID, $a_s_Mode, $a_i_Dialog, $a_
 
 	Sleep(700)
 	Leveler_SendQuestAction($a_i_QuestID, $a_s_Mode, $a_i_Dialog)
-	If $a_s_Mode = "complete" And $a_i_Dialog <> 0 Then
-		Sleep(400)
-		Ui_Dialog($a_i_Dialog)
-	EndIf
 	Sleep(500)
 	If $a_i_Multi <> 0 Then
 		Ui_Dialog($a_i_Multi)
@@ -113,13 +110,20 @@ EndFunc
 
 ; Always send the numeric dialog ID. Do not rely on Ui_AcceptQuest string hex.
 Func Leveler_SendQuestAction($a_i_QuestID, $a_s_Mode, $a_i_Dialog)
+	; Complete IDs are the reward button. The Python leveler sends it once.
+	; Extra copies go out after the window closes and the client errors 007.
+	If $a_s_Mode = "complete" Then
+		If $a_i_Dialog <> 0 Then
+			Game_Dialog($a_i_Dialog)
+		ElseIf $a_i_QuestID <> 0 Then
+			Ui_RewardQuest($a_i_QuestID)
+		EndIf
+		Return
+	EndIf
 	If $a_i_Dialog <> 0 Then Ui_Dialog($a_i_Dialog)
 	Switch $a_s_Mode
 		Case "accept"
 			If $a_i_QuestID <> 0 And $a_i_Dialog = 0 Then Ui_AcceptQuest($a_i_QuestID)
-		Case "complete"
-			If $a_i_QuestID <> 0 Then Ui_RewardQuest($a_i_QuestID)
-			If $a_i_Dialog <> 0 Then Ui_Dialog($a_i_Dialog)
 		Case "step"
 			If $a_i_QuestID <> 0 And $a_i_Dialog = 0 Then Ui_UpdateQuest($a_i_QuestID)
 		Case Else

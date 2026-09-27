@@ -136,6 +136,10 @@ Global Const $MAP_CONSULATE = 429 ; Consulate
 Global Const $MAP_DOCKS = 493 ; Consulate Docks
 Global Const $MAP_BLOODSTONE_FEN = 471 ; Bloodstone Fen
 Global Const $MAP_GTOB = 248 ; Great Temple of Balthazar
+; The Purveyor. Dialog 0x8D grants the infinite salvage and identification kits.
+Global Const $PURVEYOR_X = -6937.35
+Global Const $PURVEYOR_Y = -4997.84
+Global Const $DIALOG_PURVEYOR_KITS = 0x8D
 Global Const $MAP_LONGEYE = 650 ; Longeye's Ledge
 
 #EndRegion Maps
@@ -286,6 +290,7 @@ Global Const $DIALOG_FRONIS_ENTER = 0x85
 Global Const $DIALOG_FRONIS_REWARD = 0x835807
 Global Const $KILROY_NPC_X = 17341.00
 Global Const $KILROY_NPC_Y = -4796.00
+Global Const $MODEL_KILROY = 858 ; Kilroy Stonekin
 Global Const $FRONIS_START_X = -16919.56
 Global Const $FRONIS_START_Y = -13485.12
 Global Const $FRONIS_CHEST_X = 13275.00
@@ -301,6 +306,7 @@ Global Const $DIALOG_SUNSPEARS_COMPLETE = 0x82D407
 Global Const $DIALOG_UNLOCK_DOCKS = 0x85
 Global Const $DIALOG_OLIAS_ACCEPT = 0x830E01
 Global Const $DIALOG_OLIAS_STEP2 = 0x830E04
+Global Const $DIALOG_OLIAS_FIGO = 0x84
 Global Const $DIALOG_OLIAS_COMPLETE = 0x830E07
 Global Const $DIALOG_PROF_WARRIOR = 0x184
 Global Const $DIALOG_PROF_RANGER = 0x284
@@ -341,6 +347,11 @@ Global Const $EOTN_POOL_X = -6662.00
 Global Const $EOTN_POOL_Y = 6234.60
 Global Const $EOTN_POOL_TILE_X = -6662.00
 Global Const $EOTN_POOL_TILE_Y = 6584.00
+; Eye of the North general merchant. Sells identification kits and salvage kits.
+Global Const $EOTN_MERCHANT_X = -2700.00
+Global Const $EOTN_MERCHANT_Y = 1075.00
+Global Const $FARM_KIT_MIN_USES = 10
+Global Const $KIT_GOLD_COST = 100
 Global Const $OGDEN_HOM_X = -6133.41
 Global Const $OGDEN_HOM_Y = 5717.30
 Global Const $VEKK_HOM_X = -5626.80
@@ -430,12 +441,20 @@ Global $g_b_SpiritRiftWatch = False
 Global $g_b_FarmMode = False
 ; Kilroy punch-out / Fronis fight loop.
 Global $g_b_KilroyMode = False
+; Set after the one Punch the Clown dialog. Stops that dialog from being sent again.
+Global $g_b_PunchClownSettled = False
 Global $g_h_RiftCooldown = 0
 ; Current step title shown in the GUI / logs.
 Global $g_s_CurrentHeader = ""
 ; UtilityAI skill-bar cache is valid for $g_i_LastUAIMap.
 Global $g_b_UAIReady = False
 Global $g_i_LastUAIMap = 0
+; Punch-out slots resolved from UtilityAI Cache_SkillBar (STAND UP + fight order).
+Global $g_i_KilroyStandUpSlot = 8
+; [0]=count, [1..n]=slots in Punch_Out cast order (1,2,3,5,6,4).
+Global $g_ai_KilroyFightSlots[7]
+; Energy at 0 starts Stand Up. Skill 8 stays on until energy is 100% of the current maximum.
+Global $g_b_KilroyRecovery = False
 ; Client disconnect / lost map detected this run.
 Global $g_b_ConnectionLost = False
 ; Map ID where the Zen template was already applied this run.
@@ -446,8 +465,17 @@ Global $g_b_ZenSeitungBounceDone = False
 Global $g_b_LostTreasureToTenguOnce = False
 ; Set on Start only. Stay in an explorable after a client/script restart; do not block the next quest.
 Global $g_b_ExplorableResume = False
+; Once The Search for a Cure is the live step, a status check must not rewind earlier.
+Global $g_b_CureStepLocked = False
 ; Sticky after this character has entered Gunnar's Hold.
 Global $g_b_ReachedGunnar = False
+; GUI option. One trip to The Purveyor once the Great Temple of Balthazar is unlocked.
+Global $g_h_InfKitCheckbox = 0
+; GUI option. Off unless ticked: trainer unlocks cost gold the character may not have.
+Global $g_h_UnlockProfsCheckbox = 0
+Global $g_b_InfKitsClaimed = False
+Global $g_i_InfKitTravelFails = 0
+Global $g_b_InfKitsNoSpace = False
 ; Sticky after Bloodstone Fen for All for One and One for Justice.
 Global $g_b_OliasFenDone = False
 ; Sticky after Olias is in the party or can be added.

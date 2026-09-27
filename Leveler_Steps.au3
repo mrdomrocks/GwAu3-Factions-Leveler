@@ -14,6 +14,15 @@ Func Leveler_ExecuteStep($a_i_Step)
 		Leveler_UpdateStepCombo()
 		$a_i_Step = $LEVELER_STEP_EOTN_POOL
 	EndIf
+	If $a_i_Step < $LEVELER_STEP_CURE And ($g_b_CureStepLocked Or Leveler_Quest336Seen()) And Not Leveler_CureStepComplete() Then
+		Out("[Step] The Search For A Cure is still open. Not going back to '" & $g_as_StepNames[$a_i_Step] & "'.")
+		$g_b_CureStepLocked = True
+		$g_ab_StepDone[$LEVELER_STEP_CURE] = False
+		$g_i_Step = $LEVELER_STEP_CURE
+		Leveler_UpdateStepCombo()
+		$a_i_Step = $LEVELER_STEP_CURE
+	EndIf
+	If Not Leveler_MaybeClaimInfiniteKits() Then Return False
 	If Not Leveler_EnsureStepOutpost($a_i_Step) Then Return False
 	If Leveler_IsWiped() Then
 		Out("[Step] Wipe detected before '" & $g_as_StepNames[$a_i_Step] & "'. Recovering.")
@@ -144,7 +153,7 @@ Func Leveler_ExecuteStep($a_i_Step)
 			Out("[Step] Olias is not on the hero list. Staying on Unlock Olias.")
 			Return False
 		EndIf
-		If $a_i_Step = $LEVELER_STEP_UNLOCK_PROFS And Not Leveler_RemainingSecondariesUnlocked() Then
+		If $a_i_Step = $LEVELER_STEP_UNLOCK_PROFS And Leveler_WantsAllSecondaries() And Not Leveler_RemainingSecondariesUnlocked() Then
 			Out("[Step] Not every profession (including Paragon and Dervish) is selectable yet. Staying on this step.")
 			Return False
 		EndIf
@@ -192,6 +201,89 @@ Func Leveler_ExecuteStep($a_i_Step)
 		Return True
 	EndIf
 	Return False
+EndFunc
+
+; Empty backpack, belt pouch, and bag slots.
+Func Leveler_EmptyBagSlots()
+	Local $l_ai_Bags[4] = [$GC_I_INVENTORY_BACKPACK, $GC_I_INVENTORY_BELT_POUCH, $GC_I_INVENTORY_BAG1, $GC_I_INVENTORY_BAG2]
+	Local $l_i_Empty = 0
+	Local $b, $s
+	For $b = 0 To 3
+		If Item_GetBagPtr($l_ai_Bags[$b]) = 0 Then ContinueLoop
+		For $s = 1 To Item_GetBagInfo($l_ai_Bags[$b], "Slots")
+			If Item_GetItemBySlot($l_ai_Bags[$b], $s) = 0 Then $l_i_Empty += 1
+		Next
+	Next
+	Return $l_i_Empty
+EndFunc
+
+; True when both infinite salvage and identification kits are in the bags.
+Func Leveler_HasInfiniteKits()
+	Return Leveler_CountModel($GC_I_MODELID_INFINITE_SALVAGE_KIT, False) > 0 And Leveler_CountModel($GC_I_MODELID_INFINITE_IDENTIFICATION_KIT, False) > 0
+EndFunc
+
+; One Purveyor trip after the Great Temple of Balthazar can be traveled to.
+Func Leveler_MaybeClaimInfiniteKits()
+	If $g_b_InfKitsClaimed Then Return True
+	If $g_h_InfKitCheckbox = 0 Or Not GetChecked($g_h_InfKitCheckbox) Then Return True
+	If Leveler_HasInfiniteKits() Then
+		$g_b_InfKitsClaimed = True
+		Out("[Kits] Infinite identification and salvage kits are already in the bags.")
+		Return True
+	EndIf
+	If Not Map_IsMapUnlocked($MAP_GTOB) Then Return True
+	If Map_GetInstanceInfo("IsLoading") Then Return True
+	If Not Map_GetInstanceInfo("IsOutpost") Then Return True
+	If Leveler_IsPunchoutMap() Then Return True
+	If Leveler_EmptyBagSlots() < 2 Then
+		If Not $g_b_InfKitsNoSpace Then
+			Out("[Kits] Need two empty bag slots before picking up the infinite kits.")
+			$g_b_InfKitsNoSpace = True
+		EndIf
+		Return True
+	EndIf
+	$g_b_InfKitsNoSpace = False
+
+	Out("[Kits] Great Temple of Balthazar is unlocked. Picking up infinite kits from The Purveyor.")
+	If Map_GetMapID() <> $MAP_GTOB Then
+		If Not Leveler_Travel($MAP_GTOB) Then
+			$g_i_InfKitTravelFails += 1
+			Out("[Kits] Could not travel to the Great Temple of Balthazar.")
+			If $g_i_InfKitTravelFails >= 3 Then
+				$g_b_InfKitsClaimed = True
+				Out("[Kits] Stopping infinite-kit pickup after repeated travel failures.")
+			EndIf
+			Return True
+		EndIf
+	EndIf
+
+	If Not Leveler_MoveTo($PURVEYOR_X, $PURVEYOR_Y, False) Then Return False
+	Local $l_i_Npc = Leveler_GetAgentByName("Purveyor")
+	If $l_i_Npc = 0 Then $l_i_Npc = Leveler_GetNearestNPCAt($PURVEYOR_X, $PURVEYOR_Y, 600)
+	If $l_i_Npc = 0 Then
+		Out("[Kits] The Purveyor was not found.")
+		Return False
+	EndIf
+	Agent_ChangeTarget($l_i_Npc)
+	Sleep(150)
+	Agent_GoNPC($l_i_Npc)
+	Sleep(800)
+	Out("[Kits] Sending dialog 0x8D to The Purveyor.")
+	Game_Dialog($DIALOG_PURVEYOR_KITS)
+	Sleep(800)
+
+	Local $l_h_Timer = TimerInit()
+	While TimerDiff($l_h_Timer) < 4000
+		If Leveler_HasInfiniteKits() Then ExitLoop
+		Sleep(250)
+	WEnd
+	$g_b_InfKitsClaimed = True
+	If Leveler_HasInfiniteKits() Then
+		Out("[Kits] Infinite Superior Salvage Kit (38621) and Infinite Identification Kit (38620) are in the bags.")
+	Else
+		Out("[Kits] Dialog 0x8D was sent. The infinite kits did not both appear. Not repeating the pickup.")
+	EndIf
+	Return True
 EndFunc
 
 #EndRegion Dispatcher
@@ -457,6 +549,7 @@ Func Leveler_Step_UnlockSkills()
 	Return True
 EndFunc
 
+; Michiko's agent id, matched by model then by name.
 Func Leveler_GetMichiko()
 	Local $l_i_Npc = Leveler_GetAgentByModel($MODEL_MICHIKO)
 	If $l_i_Npc = 0 Then $l_i_Npc = Leveler_GetAgentByName("Michiko")
@@ -1766,6 +1859,7 @@ EndFunc
 ; Run The Search For A Cure.
 Func Leveler_Step_SearchForACure()
 	$g_s_CurrentHeader = "Quest: The Search For A Cure"
+	$g_b_CureStepLocked = True
 	Out("=== " & $g_s_CurrentHeader & " ===")
 	Leveler_LogQuestState($QUEST_SEARCH_CURE, "The Search For A Cure")
 	If Leveler_SearchCureDone() Then
@@ -2187,13 +2281,124 @@ Func Leveler_Step_UnlockEotnPool()
 	Return True
 EndFunc
 
+; Remaining uses on this kit model. Value is uses times the kit's value-per-use.
+Func Leveler_ModelUses($a_i_Model, $a_f_ValuePerUse)
+	If $a_f_ValuePerUse <= 0 Then Return 0
+	Local $l_av_Inv = Item_GetInventoryArray()
+	If Not IsArray($l_av_Inv) Then Return 0
+	Local $l_i_Uses = 0
+	Local $i
+	For $i = 0 To UBound($l_av_Inv) - 1
+		If $l_av_Inv[$i][$GC_I_INVENTORY_MODELID] <> $a_i_Model Then ContinueLoop
+		$l_i_Uses += Int($l_av_Inv[$i][$GC_I_INVENTORY_VALUE] / $a_f_ValuePerUse)
+	Next
+	Return $l_i_Uses
+EndFunc
+
+; Remaining identification uses, or 999 when the infinite kit is owned.
+Func Leveler_IdentifyKitUses()
+	If Leveler_CountModel($GC_I_MODELID_INFINITE_IDENTIFICATION_KIT, False) > 0 Then Return 999
+	Return Leveler_ModelUses($GC_I_MODELID_IDENTIFICATION_KIT, 2) + Leveler_ModelUses($GC_I_MODELID_SUPERIOR_IDENTIFICATION_KIT, 2.5)
+EndFunc
+
+; Remaining salvage uses, or 999 when the infinite kit is owned.
+Func Leveler_SalvageKitUses()
+	If Leveler_CountModel($GC_I_MODELID_INFINITE_SALVAGE_KIT, False) > 0 Then Return 999
+	Return Leveler_ModelUses($GC_I_MODELID_SALVAGE_KIT, 2) _
+			+ Leveler_ModelUses($GC_I_MODELID_EXPERT_SALVAGE_KIT, 8) _
+			+ Leveler_ModelUses($GC_I_MODELID_SUPERIOR_SALVAGE_KIT, 10) _
+			+ Leveler_ModelUses($GC_I_MODELID_CHARR_SALVAGE_KIT, 1) _
+			+ Leveler_ModelUses($GC_I_MODELID_PERFECT_SALVAGE_KIT, 10)
+EndFunc
+
+; Buy one basic kit from the open Eye of the North merchant.
+Func Leveler_BuyFarmKit($a_i_Model, $a_s_Label)
+	Local $l_i_Bag, $l_i_Slot
+	If Not Leveler_FindEmptyInventorySlot($l_i_Bag, $l_i_Slot) Then
+		Out("[Farm] No empty bag slot for a " & $a_s_Label)
+		Return False
+	EndIf
+	If Not Leveler_WaitForCrafterOffer($a_i_Model) Then
+		Out("[Farm] Merchant is not selling " & $a_s_Label & " (model " & $a_i_Model & ")")
+		Return False
+	EndIf
+	If Not Leveler_EnsureCharacterGold($KIT_GOLD_COST) Then
+		Out("[Farm] Need " & $KIT_GOLD_COST & " gold for a " & $a_s_Label)
+		Return False
+	EndIf
+	Local $l_i_Before = Leveler_CountModel($a_i_Model, False)
+	Out("[Farm] Buying " & $a_s_Label & " (model " & $a_i_Model & ")")
+	If Not Merchant_BuyItem($a_i_Model, 1, False) Then
+		Out("[Farm] Buy failed for " & $a_s_Label)
+		Return False
+	EndIf
+	Local $l_h_Timer = TimerInit()
+	While TimerDiff($l_h_Timer) < 4000
+		Sleep(250)
+		If Leveler_CountModel($a_i_Model, False) > $l_i_Before Then Return True
+	WEnd
+	Out("[Farm] " & $a_s_Label & " did not arrive in the bags")
+	Return False
+EndFunc
+
+; Travel to Eye of the North and buy kits when identify or salvage uses are low.
+Func Leveler_RestockFarmKits()
+	Local $l_i_Id = Leveler_IdentifyKitUses()
+	Local $l_i_Salvage = Leveler_SalvageKitUses()
+	If $l_i_Id >= $FARM_KIT_MIN_USES And $l_i_Salvage >= $FARM_KIT_MIN_USES Then
+		Out("[Farm] Kits ready (identify " & $l_i_Id & " uses, salvage " & $l_i_Salvage & " uses)")
+		Return True
+	EndIf
+
+	Out("[Farm] Identify " & $l_i_Id & " uses, salvage " & $l_i_Salvage & " uses. Traveling to Eye of the North for kits.")
+	Party_LeaveGroup(True)
+	Sleep(400)
+	If Map_GetInstanceInfo("IsLoading") Then
+		If Not Leveler_WaitUntilMapReady() Then Return False
+	EndIf
+	If Not Leveler_Travel($MAP_EOTN) Then Return False
+
+	Leveler_OutpostMove($EOTN_MERCHANT_X, $EOTN_MERCHANT_Y)
+	Local $l_b_Open = False
+	Local $l_i_Try
+	For $l_i_Try = 1 To 3
+		If Not Leveler_InteractNpcAt($EOTN_MERCHANT_X, $EOTN_MERCHANT_Y, False) Then
+			Out("[Farm] Failed to reach the Eye of the North merchant (try " & $l_i_Try & ")")
+			ContinueLoop
+		EndIf
+		If Leveler_WaitForMerchantWindow(5000) Then
+			$l_b_Open = True
+			ExitLoop
+		EndIf
+		Sleep(400)
+	Next
+	If Not $l_b_Open Then
+		Out("[Farm] Eye of the North merchant window did not open")
+		Return False
+	EndIf
+
+	If $l_i_Id < $FARM_KIT_MIN_USES Then
+		If Not Leveler_BuyFarmKit($GC_I_MODELID_IDENTIFICATION_KIT, "Identification Kit") Then Return False
+	EndIf
+	If $l_i_Salvage < $FARM_KIT_MIN_USES Then
+		If Not Leveler_BuyFarmKit($GC_I_MODELID_SALVAGE_KIT, "Salvage Kit") Then Return False
+	EndIf
+	Out("[Farm] Kits bought. Identify " & Leveler_IdentifyKitUses() & " uses, salvage " & Leveler_SalvageKitUses() & " uses.")
+	Return True
+EndFunc
+
 ; Repeat Kilroy Punch-Out Extravaganza until the character is level 20.
 Func Leveler_Step_FarmUntil20()
 	$g_s_CurrentHeader = "Farm Until Level 20"
 	Local $l_i_Level = Leveler_PlayerLevel()
 	If $l_i_Level >= 20 Then
-		$g_b_FarmMode = False
-		$g_b_KilroyMode = False
+		$g_b_FarmMode = True
+		$g_b_KilroyMode = True
+		If Leveler_IsPunchoutMap() And Agent_GetAgentInfo(-2, "CurrentEnergy") <= 0 Then
+			Leveler_HandleKilroyDeath()
+			Return False
+		EndIf
+		If Not Leveler_LeaveFarmAtLevel20() Then Return False
 		Out("[Farm] Already level " & $l_i_Level)
 		Return True
 	EndIf
@@ -2205,6 +2410,7 @@ Func Leveler_Step_FarmUntil20()
 	If Map_GetMapID() = $MAP_FRONIS Then
 		If Not Leveler_RunFronisInstance() Then Return False
 	Else
+		If Not Leveler_RestockFarmKits() Then Return False
 		If Not Leveler_HandleFronisOutpost() Then Return False
 		If Map_GetMapID() = $MAP_FRONIS Then
 			If Not Leveler_RunFronisInstance() Then Return False
@@ -2213,32 +2419,75 @@ Func Leveler_Step_FarmUntil20()
 
 	$l_i_Level = Leveler_PlayerLevel()
 	Out("[Farm] End-of-run level: " & $l_i_Level)
-	If $l_i_Level >= 20 Then
-		$g_b_FarmMode = False
-		$g_b_KilroyMode = False
-		Out("[Farm] Reached level 20")
-		Return True
-	EndIf
+	If $l_i_Level >= 20 Then Return Leveler_LeaveFarmAtLevel20()
 	Return False
 EndFunc
 
-Func Leveler_TalkKilroyNpc($a_i_Dialog)
+; Level 20 ends the farm. Leave Fronis or Kilroy, then the dispatcher advances.
+Func Leveler_LeaveFarmAtLevel20()
+	If Leveler_PlayerLevel() < 20 Then Return False
+	If $g_b_KilroyRecovery Or (Leveler_IsPunchoutMap() And Agent_GetAgentInfo(-2, "CurrentEnergy") <= 0) Then Return False
+	Local $l_i_Level = Leveler_PlayerLevel()
+	Out("[Farm] Level " & $l_i_Level & ". Leaving the punch-out instance for the next step.")
+	$g_b_FarmMode = False
+	$g_b_KilroyMode = False
+	If Map_GetMapID() = $MAP_FRONIS Or Map_GetMapID() = $MAP_KILROY Then
+		If Map_GetInstanceInfo("IsLoading") Then
+			If Not Leveler_WaitUntilMapReady() Then Return False
+		EndIf
+		If Map_GetMapID() = $MAP_FRONIS Or Map_GetMapID() = $MAP_KILROY Then
+			If Not Leveler_Travel($MAP_GUNNAR) Then Return False
+		EndIf
+	EndIf
+	Return True
+EndFunc
+
+; Walk to Kilroy Stonekin and open his dialog. Returns the agent id, or 0.
+Func Leveler_OpenKilroy()
+	If Map_GetInstanceInfo("IsLoading") Then Return 0
 	Leveler_MoveTo($KILROY_NPC_X, $KILROY_NPC_Y, False)
-	Local $l_i_Npc = Leveler_GetNearestNPCAt($KILROY_NPC_X, $KILROY_NPC_Y, 500)
+	Local $l_i_Npc = Leveler_GetAgentByModel($MODEL_KILROY)
+	If $l_i_Npc = 0 Then $l_i_Npc = Leveler_GetNearestNPCAt($KILROY_NPC_X, $KILROY_NPC_Y, 500)
 	If $l_i_Npc = 0 Then $l_i_Npc = Leveler_GetAgentByName("Kilroy")
 	If $l_i_Npc = 0 Then
 		Out("[Farm] Kilroy Stonekin not found")
-		Return False
+		Return 0
 	EndIf
-	Return Leveler_TalkAndDialog($l_i_Npc, $a_i_Dialog)
+	Agent_ChangeTarget($l_i_Npc)
+	Sleep(150)
+	Agent_GoNPC($l_i_Npc)
+	Local $l_h_Timer = TimerInit()
+	While TimerDiff($l_h_Timer) < 5000
+		If Agent_GetDistance($l_i_Npc) < $LEVELER_ARRIVE_RANGE Then ExitLoop
+		Sleep(100)
+	WEnd
+	If Agent_GetDistance($l_i_Npc) >= $LEVELER_ARRIVE_RANGE Then
+		Out("[Farm] Could not reach Kilroy Stonekin")
+		Return 0
+	EndIf
+	Sleep(700)
+	Return $l_i_Npc
 EndFunc
 
-; Punch_Out_Farm: Punch the Clown (0x835A01 / 0x84 / 0x835A07) unlocks Kilroy, then intro 0x835803, accept 0x835801, enter 0x85.
-Func Leveler_HandleFronisOutpost()
-	If Not Leveler_PunchClownDone() Then
-		Out("[Farm] Punch the Clown dialog is required before Punch-Out Extravaganza")
-		If Not Leveler_Step_UnlockKilroy() Then Return False
+; Game_Dialog sends the packet immediately. Up to three IDs, one open conversation.
+Func Leveler_SendKilroyDialogs($a_s_Label, $a_i_Dialog1, $a_i_Dialog2 = 0, $a_i_Dialog3 = 0)
+	If Leveler_OpenKilroy() = 0 Then Return False
+	Out($a_s_Label)
+	Game_Dialog($a_i_Dialog1)
+	Sleep(500)
+	If $a_i_Dialog2 <> 0 Then
+		Game_Dialog($a_i_Dialog2)
+		Sleep(500)
 	EndIf
+	If $a_i_Dialog3 <> 0 Then
+		Game_Dialog($a_i_Dialog3)
+		Sleep(500)
+	EndIf
+	Return True
+EndFunc
+
+; Punch-Out Extravaganza: intro 0x835803, accept 0x835801, enter 0x85, while Kilroy's dialog is open.
+Func Leveler_HandleFronisOutpost()
 	If Map_GetMapID() <> $MAP_GUNNAR Then
 		If Not Leveler_Travel($MAP_GUNNAR) Then Return False
 	EndIf
@@ -2248,18 +2497,45 @@ Func Leveler_HandleFronisOutpost()
 	Leveler_MoveTo($KILROY_NPC_X, $KILROY_NPC_Y, False)
 	If Leveler_QuestReadyForReward($QUEST_PUNCH_EXTRAVAGANZA) Or Quest_GetQuestInfo($QUEST_PUNCH_EXTRAVAGANZA, "IsCompleted") Then
 		Out("[Farm] Claiming Punch-Out Extravaganza reward")
-		If Not Leveler_TalkKilroyNpc($DIALOG_FRONIS_INTRO) Then Return False
-		Sleep(500)
-		Ui_Dialog($DIALOG_FRONIS_REWARD)
+		If Not Leveler_SendKilroyDialogs("[Farm] Reward dialogs 0x835803 then 0x835807", $DIALOG_FRONIS_INTRO, $DIALOG_FRONIS_REWARD) Then Return False
 		Sleep(800)
+		; The quest is offered again only after a district change.
+		Out("[Farm] Punch-Out handed in. Swapping district so the quest is available again.")
+		If Map_GetInstanceInfo("IsLoading") Then
+			If Not Leveler_WaitOutpostSettled($MAP_GUNNAR) Then Return False
+		EndIf
+		If Not Leveler_Travel($MAP_GUNNAR, True) Then Return False
+		If Not Leveler_WaitOutpostSettled($MAP_GUNNAR) Then Return False
+		Leveler_MoveTo($KILROY_NPC_X, $KILROY_NPC_Y, False)
 	EndIf
-	Out("[Farm] Taking Punch-Out Extravaganza from Kilroy")
-	If Not Leveler_TalkKilroyNpc($DIALOG_FRONIS_INTRO) Then Return False
-	Sleep(400)
-	Ui_Dialog($DIALOG_FRONIS_ACCEPT)
-	Sleep(500)
-	Ui_Dialog($DIALOG_FRONIS_ENTER)
-	Sleep(800)
+
+	Local $l_i_Try
+	For $l_i_Try = 1 To 3
+		If $g_b_LevelerPaused Then Return False
+		If Map_GetMapID() = $MAP_FRONIS Or Map_GetInstanceInfo("IsLoading") Then ExitLoop
+		If Not Leveler_SendKilroyDialogs("[Farm] Pickup 0x835801 and enter 0x85", $DIALOG_FRONIS_INTRO, $DIALOG_FRONIS_ACCEPT, $DIALOG_FRONIS_ENTER) Then
+			Sleep(500)
+			ContinueLoop
+		EndIf
+		Local $l_h_Wait = TimerInit()
+		While Map_GetMapID() = $MAP_GUNNAR And Not Map_GetInstanceInfo("IsLoading") And TimerDiff($l_h_Wait) < 5000
+			If $g_b_LevelerPaused Then Return False
+			Sleep(200)
+		WEnd
+		If Map_GetMapID() <> $MAP_GUNNAR Or Map_GetInstanceInfo("IsLoading") Then ExitLoop
+		Out("[Farm] Still in Gunnar's Hold. Sending the Fronis enter dialog again.")
+		If Not Leveler_SendKilroyDialogs("[Farm] Enter dialog 0x85", $DIALOG_FRONIS_INTRO, $DIALOG_FRONIS_ENTER) Then
+			Sleep(500)
+			ContinueLoop
+		EndIf
+		$l_h_Wait = TimerInit()
+		While Map_GetMapID() = $MAP_GUNNAR And Not Map_GetInstanceInfo("IsLoading") And TimerDiff($l_h_Wait) < 5000
+			If $g_b_LevelerPaused Then Return False
+			Sleep(200)
+		WEnd
+		If Map_GetMapID() <> $MAP_GUNNAR Or Map_GetInstanceInfo("IsLoading") Then ExitLoop
+	Next
+
 	If Not Leveler_WaitPunchoutInstance($MAP_FRONIS, 20000) Then
 		Out("[Farm] Fronis Irontoe's Lair did not load")
 		Return False
@@ -2267,6 +2543,7 @@ Func Leveler_HandleFronisOutpost()
 	Return True
 EndFunc
 
+; Clear Fronis Irontoe's Lair, take the chest, and return the Punch-Out reward.
 Func Leveler_RunFronisInstance()
 	If Map_GetMapID() <> $MAP_FRONIS Then Return False
 	$g_b_CombatMode = True
@@ -2294,13 +2571,17 @@ Func Leveler_RunFronisInstance()
 	Local $i
 	For $i = 0 To UBound($l_af_Path) - 1
 		If $g_b_LevelerPaused Then Return False
+		If Leveler_LeaveFarmAtLevel20() Then Return True
 		If Leveler_IsWiped() And Not $g_b_KilroyMode Then Return False
 		If $g_b_KilroyMode Then Leveler_HandleKilroyDeath()
 		Out("[Farm] Fronis waypoint " & ($i + 1) & "/10")
 		If Not Leveler_MoveTo($l_af_Path[$i][0], $l_af_Path[$i][1], True) Then
+			If Leveler_PlayerLevel() >= 20 Then Return Leveler_LeaveFarmAtLevel20()
 			If Map_GetMapID() <> $MAP_FRONIS Then Return True
 		EndIf
+		If Leveler_LeaveFarmAtLevel20() Then Return True
 		Leveler_WaitOutOfCombat(30000)
+		If Leveler_LeaveFarmAtLevel20() Then Return True
 		Leveler_LootNearby(0, 1200, 3000)
 		Local $l_h_Rest = TimerInit()
 		While Agent_GetAgentInfo(-2, "HP") < 0.95 And TimerDiff($l_h_Rest) < 20000
@@ -2310,6 +2591,7 @@ Func Leveler_RunFronisInstance()
 		WEnd
 	Next
 
+	If Leveler_LeaveFarmAtLevel20() Then Return True
 	Out("[Farm] Opening the Fronis chest")
 	Local $l_i_Chest = Leveler_GetNearestGadgetAt($FRONIS_CHEST_X, $FRONIS_CHEST_Y, 800)
 	If $l_i_Chest <> 0 Then
@@ -2530,96 +2812,157 @@ Func Leveler_Step_ToGunnarsHold()
 	Return True
 EndFunc
 
-; Stay on map 703 and fight. A knockdown must not travel home; that skips the clown and fails the hand-in.
+; AU3 Module_34: MoveAndFight to arena, then wait until map 703 ends.
 Func Leveler_FinishPunchClownFight()
-	Out("[Step] Fighting the clown. Staying in the instance until the quest is ready to hand in.")
+	Local Const $l_f_ArenaX = 19290.50
+	Local Const $l_f_ArenaY = -11552.23
+
+	Out("[Step] Fighting Punch the Clown. Staying in the instance until it ends.")
+	$g_b_CombatMode = True
+	If Not Leveler_PrepareKilroyCombat() Then Return False
+
+	; One walk to the arena — do not restart MoveAndFight every half-second.
+	Leveler_MoveAndFight($l_f_ArenaX, $l_f_ArenaY)
+
 	Local $l_h_Timer = TimerInit()
-	While TimerDiff($l_h_Timer) < 180000
+	While Map_GetMapID() = $MAP_KILROY And Not Map_GetInstanceInfo("IsLoading") And TimerDiff($l_h_Timer) < 120000
 		If $g_b_LevelerPaused Then Return False
-		If Leveler_QuestReadyForReward($QUEST_PUNCH_CLOWN) Then
-			Out("[Step] Punch the Clown is ready to hand in.")
-			Return True
+		; The instance unloads as soon as the clown dies. A move or skill during that load crashes the client.
+		If Leveler_KilroyFoeCount(1500) > 0 Then
+			Leveler_HandleKilroyDeath()
+			Leveler_KilroyCombatTick(1500, True)
 		EndIf
-		If Map_GetMapID() <> $MAP_KILROY Then
-			Out("[Step] Left Punch the Clown before it was ready to hand in.")
-			Return False
-		EndIf
-		If Agent_GetDistanceToXY(19290.50, -11552.23) >= $LEVELER_ARRIVE_RANGE Then
-			Leveler_MoveTo(19290.50, -11552.23, True)
-		Else
-			Leveler_CombatTick()
-			Sleep(50)
-		EndIf
+		Sleep(100)
 	WEnd
-	If Leveler_QuestReadyForReward($QUEST_PUNCH_CLOWN) Then Return True
-	Out("[Step] Punch the Clown fight timed out before the hand-in.")
+
+	If Map_GetInstanceInfo("IsLoading") Or Map_GetMapID() <> $MAP_KILROY Then
+		Out("[Step] Punch the Clown ended. Waiting for Gunnar's Hold to finish loading.")
+		Return Leveler_WaitOutpostSettled($MAP_GUNNAR)
+	EndIf
+	If Leveler_QuestReadyForReward($QUEST_PUNCH_CLOWN) Then Return Leveler_WaitOutpostSettled($MAP_GUNNAR)
+	Out("[Step] Punch the Clown fight timed out.")
 	Return False
 EndFunc
 
-; Accept, run, and complete Punch the Clown to unlock Kilroy punch-out.
+; Punch the Clown returns to Gunnar on its own. Do not Map_TravelTo while that load is in progress.
+Func Leveler_WaitOutpostSettled($a_i_MapID, $a_i_Timeout = 60000)
+	Local $l_h_Timer = TimerInit()
+	While TimerDiff($l_h_Timer) < $a_i_Timeout
+		If $g_b_LevelerPaused Then Return False
+		If Map_GetMapID() = $a_i_MapID And Map_GetInstanceInfo("IsOutpost") And Leveler_ClientIsReady() Then
+			Sleep(1500)
+			If Map_GetMapID() = $a_i_MapID And Leveler_ClientIsReady() And Not Map_GetInstanceInfo("IsLoading") Then Return True
+		EndIf
+		Sleep(200)
+	WEnd
+	Return Map_GetMapID() = $a_i_MapID And Map_GetInstanceInfo("IsOutpost") And Leveler_ClientIsReady()
+EndFunc
+
+; One Punch the Clown dialog. A map change runs the clown fight. Staying in Gunnar's Hold means it is already done.
 Func Leveler_Step_UnlockKilroy()
 	$g_s_CurrentHeader = "Unlock Kilroy Stonekin"
 	Out("=== " & $g_s_CurrentHeader & " ===")
-	If Leveler_SkipIfQuestDone($QUEST_PUNCH_CLOWN, "Punch the Clown") Then Return True
+	If $g_b_PunchClownSettled Or Leveler_SkipIfQuestDone($QUEST_PUNCH_CLOWN, "Punch the Clown") Then Return True
 
-	If Not Leveler_Travel($MAP_GUNNAR) Then Return False
+	$g_b_CombatMode = True
 	$g_b_KilroyMode = True
+
+	If Map_GetMapID() = $MAP_KILROY Or (Map_GetInstanceInfo("IsLoading") And Map_GetMapID() <> $MAP_GUNNAR And Map_GetMapID() <> $MAP_FRONIS) Then
+		Out("[Step] Already in Punch the Clown. Finishing the fight.")
+		If Not Leveler_RunPunchClownInstance() Then
+			$g_b_KilroyMode = False
+			Return False
+		EndIf
+		Leveler_SettlePunchClown()
+		$g_b_KilroyMode = False
+		Out("[Step] Punch the Clown finished. It will not be started again.")
+		Return True
+	EndIf
+
+	If Not Leveler_Travel($MAP_GUNNAR) Then
+		$g_b_KilroyMode = False
+		Return False
+	EndIf
+
+	Local $l_i_Before = Map_GetMapID()
+	Local $l_b_Sent = False
 	If Not Leveler_HasQuest($QUEST_PUNCH_CLOWN) Then
-		If Not Leveler_QuestLoop($QUEST_PUNCH_CLOWN, 17341.00, -4796.00, $DIALOG_PUNCH_ACCEPT, "accept") Then
-			$g_b_KilroyMode = False
-			Return False
-		EndIf
+		$l_b_Sent = Leveler_SendKilroyDialogs("[Step] Punch the Clown dialog once (0x835A01, 0x84)", $DIALOG_PUNCH_ACCEPT, $DIALOG_GENERIC_TALK)
+	Else
+		$l_b_Sent = Leveler_SendKilroyDialogs("[Step] Punch the Clown dialog once (0x84)", $DIALOG_GENERIC_TALK)
 	EndIf
-	If Map_GetMapID() <> $MAP_KILROY Then
-		If Not Leveler_QuestLoop($QUEST_PUNCH_CLOWN, 17341.00, -4796.00, $DIALOG_GENERIC_TALK, "step") Then
-			If Map_GetMapID() <> $MAP_KILROY Then
-				$g_b_KilroyMode = False
-				Return False
-			EndIf
-		EndIf
-		If Not Leveler_WaitForMap($MAP_KILROY, 20000) And Map_GetMapID() <> $MAP_KILROY Then
-			$g_b_KilroyMode = False
-			Return False
-		EndIf
-	EndIf
-
-	If Not Leveler_WaitKilroyInstance() Then
-		Out("[Step] Punch the Clown map did not finish loading")
-		$g_b_KilroyMode = False
-		Return False
-	EndIf
-	Out("[Step] Punch the Clown map loaded. Equipping brass knuckles.")
-	If Not Leveler_EquipBrassKnuckles() Then
-		$g_b_KilroyMode = False
-		Return False
-	EndIf
-	If Not Leveler_PrepareKilroyCombat() Then
-		Out("[Step] Kilroy skill cache failed after equipping knuckles")
-		$g_b_KilroyMode = False
-		Return False
-	EndIf
-	If Not Leveler_WaitCombat(3000) Then
-		$g_b_KilroyMode = False
-		Return False
-	EndIf
-	If Not Leveler_FinishPunchClownFight() Then
+	If Not $l_b_Sent Then
 		$g_b_KilroyMode = False
 		Return False
 	EndIf
 
-	If Map_GetMapID() <> $MAP_GUNNAR Then
-		If Not Leveler_Travel($MAP_GUNNAR) Then
+	Local $l_h_Wait = TimerInit()
+	While Map_GetMapID() = $l_i_Before And Not Map_GetInstanceInfo("IsLoading") And TimerDiff($l_h_Wait) < 8000
+		If $g_b_LevelerPaused Then
 			$g_b_KilroyMode = False
 			Return False
 		EndIf
+		Sleep(200)
+	WEnd
+
+	If Map_GetMapID() <> $l_i_Before Or Map_GetInstanceInfo("IsLoading") Then
+		Out("[Step] Punch the Clown instance changed. Running the clown fight.")
+		If Not Leveler_RunPunchClownInstance() Then
+			$g_b_KilroyMode = False
+			Return False
+		EndIf
+		Leveler_SettlePunchClown()
+		$g_b_KilroyMode = False
+		Out("[Step] Punch the Clown finished. It will not be started again.")
+		Return True
 	EndIf
-	If Not Leveler_QuestLoop($QUEST_PUNCH_CLOWN, 17341.00, -4796.00, $DIALOG_PUNCH_COMPLETE, "complete") Then
+
+	Out("[Step] Still in Gunnar's Hold. Punch the Clown is already complete. Starting Punch-Out.")
+	Leveler_SettlePunchClown()
+	$g_b_FarmMode = True
+	If Not Leveler_HandleFronisOutpost() Then
 		$g_b_KilroyMode = False
 		Return False
+	EndIf
+	If Map_GetMapID() = $MAP_FRONIS Then
+		If Not Leveler_RunFronisInstance() Then
+			$g_b_KilroyMode = False
+			Return False
+		EndIf
 	EndIf
 	$g_b_KilroyMode = False
-	Leveler_EquipItemByModel($MODEL_KEIRAN_BOW)
-	Out("[Step] Kilroy Stonekin unlocked")
+	Out("[Step] Punch-Out run finished. Punch the Clown will not be started again.")
+	Return True
+EndFunc
+
+; Fight Punch the Clown, then hand the quest back in Gunnar's Hold.
+Func Leveler_RunPunchClownInstance()
+	If Not Leveler_WaitKilroyInstance() And Map_GetMapID() <> $MAP_KILROY Then
+		Out("[Step] Punch the Clown map did not load")
+		Return False
+	EndIf
+	Out("[Step] Equipping brass knuckles (24897)")
+	If Not Leveler_EquipBrassKnuckles() Then Return False
+	Sleep(3000)
+	If Not Leveler_PrepareKilroyCombat() Then
+		Out("[Step] Brawling skill cache failed after equipping knuckles")
+		Return False
+	EndIf
+	If Not Leveler_FinishPunchClownFight() Then Return False
+	If Not Leveler_WaitOutpostSettled($MAP_GUNNAR) Then
+		If Not Leveler_ClientIsReady() Or Map_GetInstanceInfo("IsLoading") Then
+			Out("[Step] Gunnar's Hold did not finish loading after Punch the Clown")
+			Return False
+		EndIf
+		If Map_GetMapID() <> $MAP_GUNNAR Then
+			If Not Leveler_Travel($MAP_GUNNAR) Then Return False
+		EndIf
+	EndIf
+	If Leveler_HasQuest($QUEST_PUNCH_CLOWN) Then
+		Leveler_QuestLoop($QUEST_PUNCH_CLOWN, 17341.00, -4796.00, $DIALOG_PUNCH_COMPLETE, "complete")
+	EndIf
+	Sleep(800)
+	If Leveler_ClientIsReady() And Not Map_GetInstanceInfo("IsLoading") Then Leveler_EquipModel($MODEL_KEIRAN_BOW)
 	Return True
 EndFunc
 
@@ -2788,6 +3131,70 @@ Func Leveler_Step_ToConsulateDocks()
 	Return True
 EndFunc
 
+; Already in Lion's Arch with the quest in the log: walk to Figo and continue. Do not go to the docks or Kamadan.
+Func Leveler_OliasContinueAtFigo()
+	If Map_GetMapID() = $MAP_LIONS_ARCH And Leveler_IsOutpost() And Leveler_HasQuest($QUEST_OLIAS) And Not Leveler_QuestReadyForReward($QUEST_OLIAS) Then
+		Return True
+	EndIf
+	Return False
+EndFunc
+
+; Open Figo and send 0x84 while that window is open. Same ID as the Python leveler step.
+; Ui_Dialog only queues the packet, so the window was already closed when the ID went out.
+Func Leveler_SendLionguardFigoDialogs($a_f_X, $a_f_Y)
+	Local $l_i_Figo = Leveler_GetAgentByName("Figo")
+	If $l_i_Figo = 0 Then $l_i_Figo = Leveler_ResolveTalkNpc($a_f_X, $a_f_Y)
+	If $l_i_Figo = 0 Then
+		Out("[Step] Lionguard Figo not found")
+		Return False
+	EndIf
+	Agent_ChangeTarget($l_i_Figo)
+	Sleep(150)
+	Agent_GoNPC($l_i_Figo)
+	Local $l_h_Timer = TimerInit()
+	While TimerDiff($l_h_Timer) < 5000
+		If Agent_GetDistance($l_i_Figo) < $LEVELER_ARRIVE_RANGE Then ExitLoop
+		Sleep(100)
+	WEnd
+	If Agent_GetDistance($l_i_Figo) >= $LEVELER_ARRIVE_RANGE Then
+		Out("[Step] Could not reach Lionguard Figo")
+		Return False
+	EndIf
+	Sleep(400)
+	Out("[Step] Lionguard Figo dialog 0x84")
+	Game_Dialog($DIALOG_OLIAS_FIGO)
+	Sleep(400)
+	Return True
+EndFunc
+
+; Walk to Lionguard Figo and send 0x84.
+Func Leveler_TalkToLionguardFigo()
+	Local $l_f_FigoX = -1137.00
+	Local $l_f_FigoY = 2501.00
+	Out("[Step] Walking to Lionguard Figo to continue All for One and One for Justice.")
+	If Map_GetMapID() <> $MAP_LIONS_ARCH Then
+		Party_LeaveGroup(True)
+		Sleep(300)
+		If Not Leveler_Travel($MAP_LIONS_ARCH) Then Return False
+	EndIf
+	Party_LeaveGroup(True)
+	Sleep(300)
+	Local $l_ai_Hench[1] = [1]
+	Leveler_PrepareHeroTeam($l_ai_Hench)
+	If Map_GetMapID() = $MAP_LIONS_ARCH And Agent_GetDistanceToXY($l_f_FigoX, $l_f_FigoY) < 600 Then
+		Out("[Step] Already near Lionguard Figo. Skipping the walk.")
+	Else
+		If Not Leveler_MoveTo(1413.11, 9255.51, False) Then Return False
+		If Not Leveler_MoveTo(242.96, 6130.82, False) Then Return False
+		If Not Leveler_MoveTo($l_f_FigoX, $l_f_FigoY, False) Then Return False
+	EndIf
+	If Not Leveler_SendLionguardFigoDialogs($l_f_FigoX, $l_f_FigoY) Then
+		If Map_GetMapID() = $MAP_LIONS_ARCH Then Return False
+	EndIf
+	If Not Leveler_WaitForMap($MAP_BLOODSTONE_FEN, 45000) And Map_GetMapID() <> $MAP_BLOODSTONE_FEN Then Return False
+	Return True
+EndFunc
+
 ; Run the Olias unlock quest from Consulate Docks.
 Func Leveler_Step_UnlockOlias()
 	$g_s_CurrentHeader = "Unlock Olias"
@@ -2800,31 +3207,22 @@ Func Leveler_Step_UnlockOlias()
 		If Leveler_ConfirmOliasInHeroList() Then Return True
 	EndIf
 
-	If Leveler_OliasReadyToTurnIn() Or Map_GetMapID() = $MAP_KAMADAN Then
-		Return Leveler_OliasReturnToKamadan()
-	EndIf
-
-	If Not Leveler_HasQuest($QUEST_OLIAS) Then
-		If Not Leveler_Travel($MAP_DOCKS) Then Return False
-		If Not Leveler_QuestLoop($QUEST_OLIAS, -2367.00, 16796.00, $DIALOG_OLIAS_ACCEPT, "accept") Then Return False
-	EndIf
-
-	If Map_GetMapID() <> $MAP_BLOODSTONE_FEN Then
-		If Map_GetMapID() <> $MAP_LIONS_ARCH Then
-			Party_LeaveGroup(True)
-			Sleep(300)
-			If Not Leveler_Travel($MAP_LIONS_ARCH) Then Return False
+	If Leveler_OliasContinueAtFigo() Then
+		Out("[Step] Already in Lion's Arch. All for One and One for Justice is in the quest log.")
+		If Not Leveler_TalkToLionguardFigo() Then Return False
+	Else
+		If Leveler_OliasReadyToTurnIn() Or Map_GetMapID() = $MAP_KAMADAN Then
+			Return Leveler_OliasReturnToKamadan()
 		EndIf
-		Party_LeaveGroup(True)
-		Sleep(300)
-		Local $l_ai_Hench[1] = [1]
-		Leveler_PrepareHeroTeam($l_ai_Hench)
-		If Not Leveler_MoveTo(1413.11, 9255.51, False) Then Return False
-		If Not Leveler_MoveTo(242.96, 6130.82, False) Then Return False
-		If Not Leveler_QuestLoop($QUEST_OLIAS, -1137.00, 2501.00, $DIALOG_GENERIC_TALK, "step") Then
-			If Map_GetMapID() = $MAP_LIONS_ARCH Then Return False
+
+		If Not Leveler_HasQuest($QUEST_OLIAS) Then
+			If Not Leveler_Travel($MAP_DOCKS) Then Return False
+			If Not Leveler_QuestLoop($QUEST_OLIAS, -2367.00, 16796.00, $DIALOG_OLIAS_ACCEPT, "accept") Then Return False
 		EndIf
-		If Not Leveler_WaitForMap($MAP_BLOODSTONE_FEN, 45000) And Map_GetMapID() <> $MAP_BLOODSTONE_FEN Then Return False
+
+		If Map_GetMapID() <> $MAP_BLOODSTONE_FEN Then
+			If Not Leveler_TalkToLionguardFigo() Then Return False
+		EndIf
 	EndIf
 
 	If Map_GetMapID() = $MAP_BLOODSTONE_FEN Then
@@ -2850,6 +3248,7 @@ Func Leveler_Step_UnlockOlias()
 	Return Leveler_OliasReturnToKamadan()
 EndFunc
 
+; Travel to Kamadan and hand in All for One and One for Justice.
 Func Leveler_OliasReturnToKamadan()
 	$g_b_OliasFenDone = True
 	$g_b_CombatMode = False
@@ -2864,6 +3263,8 @@ Func Leveler_OliasReturnToKamadan()
 	If Not Leveler_Travel($MAP_KAMADAN) Then Return False
 	If Not Leveler_MoveTo(-8149.02, 14900.65, False) Then Return False
 	If Not Leveler_QuestLoop($QUEST_OLIAS, -6480.00, 16331.00, $DIALOG_OLIAS_COMPLETE, "complete") Then Return False
+	; The reward can still be closing. Party packets during that window 007.
+	Leveler_WaitOutpostSettled($MAP_KAMADAN, 20000)
 	If Not Leveler_ConfirmOliasInHeroList() Then Return False
 	Out("[Step] Olias unlocked")
 	Return True
@@ -2909,6 +3310,10 @@ EndFunc
 Func Leveler_Step_UnlockSecondaryProfs()
 	$g_s_CurrentHeader = "Unlock Remaining Secondary Professions"
 	Out("=== " & $g_s_CurrentHeader & " ===")
+	If Not Leveler_WantsAllSecondaries() Then
+		Out("[Step] Unlock All Secondary Professions is off. Not spending gold at the trainers.")
+		Return True
+	EndIf
 	If Leveler_RemainingSecondariesUnlocked() Then
 		Out("[Step] All professions are already available to select")
 		Return True

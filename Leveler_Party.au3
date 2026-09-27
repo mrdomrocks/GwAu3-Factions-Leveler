@@ -60,6 +60,7 @@ Func Leveler_ProfessionBitOn($a_i_Flags, $a_i_Prof)
 	Return False
 EndFunc
 
+; How many of the ten professions are set in the unlock bitfield.
 Func Leveler_ProfessionUnlockCount($a_i_Flags)
 	Local $l_i_Count = 0
 	Local $i
@@ -67,6 +68,12 @@ Func Leveler_ProfessionUnlockCount($a_i_Flags)
 		If Leveler_ProfessionBitOn($a_i_Flags, $i) Then $l_i_Count += 1
 	Next
 	Return $l_i_Count
+EndFunc
+
+; True only when the GUI tick box for buying every remaining secondary is checked.
+Func Leveler_WantsAllSecondaries()
+	If $g_h_UnlockProfsCheckbox = 0 Then Return False
+	Return GetChecked($g_h_UnlockProfsCheckbox)
 EndFunc
 
 ; GToB trainers unlock every secondary, including Paragon and Dervish.
@@ -93,6 +100,7 @@ Func Leveler_HeroCount()
 	Return Party_GetMyPartyInfo("ArrayHeroPartyMemberSize")
 EndFunc
 
+; True when this hero id is already in the party.
 Func Leveler_PartyHasHero($a_i_HeroID)
 	If $a_i_HeroID <= 0 Then Return False
 	Local $l_i_Count = Leveler_HeroCount()
@@ -309,12 +317,11 @@ Func Leveler_CacheUtilityAIForMap($a_i_MapID)
 	Return True
 EndFunc
 
-; Fronis is a dungeon (instance type is not always Explorable). Cache anyway.
+; Cache UtilityAI skill bar. Fronis is a dungeon, so its instance type is not always Explorable.
+; Cache_SkillBar() refuses that and leaves CanUse_Brawling* unbound, so the fight never starts.
 Func Leveler_CacheSkillBarNow()
 	If Map_GetInstanceInfo("IsLoading") Then Return False
-	If Map_GetInstanceInfo("IsExplorable") Then
-		If Cache_SkillBar() Then Return True
-	EndIf
+	If Map_GetInstanceInfo("IsExplorable") Then Return Cache_SkillBar()
 	If Not Leveler_IsPunchoutMap() Then Return False
 	UAI_CacheSkillBar()
 	Local $i

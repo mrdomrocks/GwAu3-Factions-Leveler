@@ -160,11 +160,13 @@ EndFunc
 
 #Region Skill Bar
 
+; True when this character or the account already has the skill.
 Func Leveler_SkillIsLearnt($a_i_SkillID)
 	If World_IsSkillLearnt($a_i_SkillID) Then Return True
 	Return Account_IsSkillUnlocked($a_i_SkillID)
 EndFunc
 
+; Poll until the skill shows as learnt, or the wait times out.
 Func Leveler_WaitSkillLearnt($a_i_SkillID)
 	Local $l_h_Timer = TimerInit()
 	While TimerDiff($l_h_Timer) < 8000
@@ -183,6 +185,7 @@ Func Leveler_BarHasSkill($a_i_SkillID)
 	Return False
 EndFunc
 
+; Put a learnt skill on a bar slot and wait until the bar shows it.
 Func Leveler_PutSkillOnBar($a_i_Slot, $a_i_SkillID)
 	If $a_i_SkillID = 0 Then Return True
 	If Skill_GetSkillbarInfo($a_i_Slot, "SkillID") = $a_i_SkillID Then Return True
@@ -207,6 +210,7 @@ Func Leveler_PutSkillOnBar($a_i_Slot, $a_i_SkillID)
 	Return False
 EndFunc
 
+; Cancel the trainer dialog and step off so the window closes.
 Func Leveler_CloseTrainerWindow()
 	Agent_CancelAction()
 	Sleep(300)
@@ -218,6 +222,7 @@ Func Leveler_CloseTrainerWindow()
 	Sleep(200)
 EndFunc
 
+; True when the current trainer set (Zhao Di or the interrupt set) is on the bar.
 Func Leveler_TrainerSkillsOnBar()
 	If Leveler_InterruptSkillsUnlocked() Then
 		If Not Leveler_BarHasSkill($SKILL_CRY_OF_FRUSTRATION) Then Return False
@@ -230,6 +235,7 @@ Func Leveler_TrainerSkillsOnBar()
 	Return True
 EndFunc
 
+; Buy a skill from the open trainer when it is not already learnt.
 Func Leveler_BuySkillIfNeeded($a_i_SkillID)
 	If World_IsSkillLearnt($a_i_SkillID) Then Return True
 	Skill_BuySkillByID($a_i_SkillID)
@@ -277,6 +283,7 @@ Func Leveler_EquipTrainerSkills($a_b_CloseTrainer = True)
 	Return False
 EndFunc
 
+; In an outpost, load the profession bar and fill any missing trainer skills.
 Func Leveler_EquipSkillBar()
 	If Not Map_GetInstanceInfo("IsOutpost") Then Return True
 	If Leveler_InterruptSkillsUnlocked() Then

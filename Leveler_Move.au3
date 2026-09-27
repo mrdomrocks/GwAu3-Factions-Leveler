@@ -66,23 +66,28 @@ Func Leveler_MoveTo($a_f_X, $a_f_Y, $a_b_Combat = False)
 		$a_b_Combat = False
 	EndIf
 
+	; Punch-out arenas: AU3 Runner_MoveAndFight (walk, clear foes, resume). No Pathfinder/UAI.
+	If Leveler_IsPunchoutMap() And $a_b_Combat Then
+		Return Leveler_MoveAndFight($a_f_X, $a_f_Y)
+	EndIf
+
 	Local $l_i_StartMap = Map_GetMapID()
 	Local $l_b_Mission = Leveler_InMissionInstance()
 	Local $l_b_Explorable = Leveler_ShouldFightHere()
 	Leveler_EnsurePathfinder()
 
 	Local $l_v_Obstacles = 0
-	Local $l_i_Aggro = 0
+	; Aggro -1 so Pathfinder's UAI_Fight exits before UAI_UseSkills. Aggro 0 still runs when distance is 0.
+	Local $l_i_Aggro = -1
 	If $a_b_Combat Then
 		Leveler_PrepareCombatAI()
-		$l_i_Aggro = $LEVELER_AGGRO
-		; Mission bridges are single-file. Enemy obstacles often block A* on the only walkable strip.
-		; Fight via Pathfinder aggro instead; keep dynamic obstacles for normal explorables.
+		; Mission bridges are single-file. Enemy obstacles block A* on the only walkable strip.
 		If Not $l_b_Mission Then $l_v_Obstacles = "Leveler_GetObstacles"
 	EndIf
 
+	$g_b_LevelerPathCombat = $a_b_Combat
 	Local $l_s_Callback = ""
-	If $g_b_SpiritRiftWatch Then $l_s_Callback = "Leveler_InterruptSpiritRifts"
+	If $a_b_Combat Or $g_b_SpiritRiftWatch Then $l_s_Callback = "Leveler_PathCombat"
 
 	Local $l_b_Ok = False
 	Local $l_b_HaveMesh = Pathfinder_IsMapAvailable($l_i_StartMap)
@@ -108,6 +113,7 @@ Func Leveler_MoveTo($a_f_X, $a_f_Y, $a_b_Combat = False)
 
 	If Map_GetMapID() <> $l_i_StartMap Then Return True
 	If Leveler_IsWiped() Then Return False
+	If $a_b_Combat And Not Map_GetInstanceInfo("IsLoading") And Not $g_b_KilroyRecovery Then Leveler_LootNearby(0, 1200, 2500)
 	If Agent_GetDistanceToXY($a_f_X, $a_f_Y) < $LEVELER_ARRIVE_RANGE Then Return True
 	Return $l_b_Ok
 EndFunc
@@ -181,6 +187,7 @@ Func Leveler_RunTo($a_f_X, $a_f_Y, $a_i_Timeout = 180000)
 	Return Agent_GetDistanceToXY($a_f_X, $a_f_Y) < $LEVELER_ARRIVE_RANGE
 EndFunc
 
+; Pathfinder path to a point. $a_b_Avoid adds nearby obstacles so the run steps around them.
 Func Leveler_BuildRunPath($a_f_X, $a_f_Y, $a_b_Avoid)
 	Local $l_v_Obs = 0
 	If $a_b_Avoid Then $l_v_Obs = Leveler_GetObstacles(400, 2500)
@@ -270,6 +277,7 @@ Func Leveler_TalkHomHero($a_i_Model, $a_f_X, $a_f_Y, $a_i_Dialog, $a_s_Name)
 	Return True
 EndFunc
 
+; Jora's agent id, matched by model then by name.
 Func Leveler_GetJora()
 	Local $l_i_Npc = Leveler_GetAgentByModel($MODEL_JORA)
 	If $l_i_Npc = 0 Then $l_i_Npc = Leveler_GetAgentByModel($MODEL_JORA_ALT)
@@ -301,6 +309,7 @@ Func Leveler_ExitEotnToIceCliff()
 	Return Map_GetMapID() = $MAP_ICE_CLIFF
 EndFunc
 
+; Reach Ice Cliff Chasms and take Tracking the Nornbear from Jora.
 Func Leveler_TalkJoraOnIceCliff()
 	If Leveler_HasNornbearTracking() Then
 		Out("[Step] Tracking the Nornbear is already handled")
@@ -918,14 +927,19 @@ Func Leveler_GetObstacles($a_f_Radius = 100, $a_f_DetectionRange = 4000)
 	Return $l_af_Obs
 EndFunc
 
-; One UtilityAI fight tick at the player's current position.
+; One fight tick at the player's current position.
+; Punch-out maps use brawling skills (old Kilroy_Fight); everywhere else uses UtilityAI.
 Func Leveler_CombatTick()
 	If $g_b_KilroyMode Or $g_b_FarmMode Or Leveler_IsPunchoutMap() Then
 		If Leveler_HandleKilroyDeath() Then Return
+		If Leveler_IsPunchoutMap() Then
+			Leveler_KilroyCombatTick(1500, True)
+			Return
+		EndIf
 	EndIf
 	If Not Leveler_ShouldFightHere() Then Return
 	If Not Leveler_PrepareCombatAI() Then Return
-	UAI_Fight(Agent_GetAgentInfo(-2, "X"), Agent_GetAgentInfo(-2, "Y"), $LEVELER_AGGRO, $LEVELER_FIGHT_RANGE_OUT)
+	Leveler_UAI_Fight(Agent_GetAgentInfo(-2, "X"), Agent_GetAgentInfo(-2, "Y"), $LEVELER_AGGRO, $LEVELER_FIGHT_RANGE_OUT)
 EndFunc
 
 ; Fight in place for the given milliseconds.
@@ -968,7 +982,10 @@ Func Leveler_WaitOutOfCombat($a_i_Timeout = 120000)
 		If $g_b_SpiritRiftWatch Then Leveler_InterruptSpiritRifts()
 		If Not Leveler_InDanger($LEVELER_AGGRO) Then
 			If $l_h_Clear = 0 Then $l_h_Clear = TimerInit()
-			If TimerDiff($l_h_Clear) >= 2000 Then Return True
+			If TimerDiff($l_h_Clear) >= 2000 Then
+				If Not Map_GetInstanceInfo("IsLoading") And Not $g_b_KilroyRecovery Then Leveler_LootNearby(0, 1200, 2500)
+				Return True
+			EndIf
 		Else
 			$l_h_Clear = 0
 			Leveler_CombatTick()
@@ -1036,7 +1053,7 @@ Func Leveler_FollowLostTreasurePath($a_i_Timeout = 600000)
 		If $l_i_Npc = 0 Then
 			If Leveler_ShouldFightHere() Then
 				If Not Leveler_PrepareCombatAI() Then Return False
-				UAI_UseSkills(Agent_GetAgentInfo(-2, "X"), Agent_GetAgentInfo(-2, "Y"), $LEVELER_AGGRO, $LEVELER_FIGHT_RANGE_OUT)
+				Leveler_UAI_UseSkills(Agent_GetAgentInfo(-2, "X"), Agent_GetAgentInfo(-2, "Y"), $LEVELER_AGGRO, $LEVELER_FIGHT_RANGE_OUT)
 			EndIf
 			Map_Move($LOST_CHO_END_X, $LOST_CHO_END_Y, 20)
 			Sleep(400)
@@ -1045,7 +1062,7 @@ Func Leveler_FollowLostTreasurePath($a_i_Timeout = 600000)
 		If Agent_GetDistance($l_i_Npc) > $LEVELER_AREA_RANGE Then
 			If Leveler_ShouldFightHere() Then
 				If Not Leveler_PrepareCombatAI() Then Return False
-				UAI_UseSkills(Agent_GetAgentInfo(-2, "X"), Agent_GetAgentInfo(-2, "Y"), $LEVELER_AGGRO, $LEVELER_FIGHT_RANGE_OUT)
+				Leveler_UAI_UseSkills(Agent_GetAgentInfo(-2, "X"), Agent_GetAgentInfo(-2, "Y"), $LEVELER_AGGRO, $LEVELER_FIGHT_RANGE_OUT)
 			EndIf
 			Map_Move(Agent_GetAgentInfo($l_i_Npc, "X"), Agent_GetAgentInfo($l_i_Npc, "Y"), 20)
 		Else
@@ -1067,6 +1084,7 @@ Func Leveler_GetNearestGadget($a_f_Range = 400)
 	Return Leveler_GetNearestGadgetAt(Agent_GetAgentInfo(-2, "X"), Agent_GetAgentInfo(-2, "Y"), $a_f_Range)
 EndFunc
 
+; Nearest gadget or signpost within range of a point.
 Func Leveler_GetNearestGadgetAt($a_f_X, $a_f_Y, $a_f_Range = 400)
 	Local $l_i_Best = 0
 	Local $l_f_Best = $a_f_Range
@@ -1119,12 +1137,29 @@ Func Leveler_GetGroundItemByModel($a_i_Model, $a_f_Range = 2500)
 	Return $l_i_Best
 EndFunc
 
-; Pick up nearby ground items until none remain or the timeout.
+; Item IDs already in the backpack, so salvage only touches what was just picked up.
+Func Leveler_BagItemIDList()
+	Local $l_s_List = "|"
+	Local $l_i_Bag, $l_i_Slot, $l_p_Item
+	For $l_i_Bag = 1 To 4
+		If Item_GetBagPtr($l_i_Bag) = 0 Then ContinueLoop
+		For $l_i_Slot = 1 To Item_GetBagInfo($l_i_Bag, "Slots")
+			$l_p_Item = Item_GetItemBySlot($l_i_Bag, $l_i_Slot)
+			If $l_p_Item = 0 Then ContinueLoop
+			$l_s_List &= Item_GetItemInfoByPtr($l_p_Item, "ItemID") & "|"
+		Next
+	Next
+	Return $l_s_List
+EndFunc
+
+; Pick up nearby ground items and gold, then identify and salvage the new drops.
 Func Leveler_LootNearby($a_i_Model = 0, $a_f_Range = 2000, $a_i_Timeout = 10000)
+	Local $l_s_Before = Leveler_BagItemIDList()
 	Local $l_h_Timer = TimerInit()
 	Local $l_i_Picked = 0
 	While TimerDiff($l_h_Timer) < $a_i_Timeout
 		If $g_b_KilroyMode Or $g_b_FarmMode Then Leveler_HandleKilroyDeath()
+		If $g_b_KilroyRecovery Then ExitLoop
 		If Leveler_IsWiped() Then Return False
 		Local $l_i_Agent = Leveler_GetGroundItemByModel($a_i_Model, $a_f_Range)
 		If $l_i_Agent = 0 Then ExitLoop
@@ -1137,6 +1172,61 @@ Func Leveler_LootNearby($a_i_Model = 0, $a_f_Range = 2000, $a_i_Timeout = 10000)
 		$l_i_Picked += 1
 	WEnd
 	If $l_i_Picked > 0 Then Out("[Move] Looted " & $l_i_Picked & " item(s)")
+	If $l_i_Picked > 0 And Not $g_b_KilroyRecovery And Not Map_GetInstanceInfo("IsLoading") Then
+		Leveler_IdentifyAndSalvageLoot($l_s_Before)
+	EndIf
+	Return True
+EndFunc
+
+; White and blue weapons and armor are salvaged for materials. Quest items, gold, kits, and rares are kept.
+Func Leveler_ShouldSalvageDrop($a_p_Item)
+	If $a_p_Item = 0 Then Return False
+	If Item_GetItemInfoByPtr($a_p_Item, "Customized") <> 0 Then Return False
+	If Not Item_GetItemInfoByPtr($a_p_Item, "IsIdentified") Then Return False
+	If Not Item_GetItemInfoByPtr($a_p_Item, "IsMaterialSalvageable") Then Return False
+	Local $l_i_Rarity = Item_GetItemInfoByPtr($a_p_Item, "Rarity")
+	If $l_i_Rarity <> $GC_I_RARITY_WHITE And $l_i_Rarity <> $GC_I_RARITY_BLUE Then Return False
+	Switch Item_GetItemInfoByPtr($a_p_Item, "ItemType")
+		Case $GC_I_TYPE_LEADHAND, $GC_I_TYPE_AXE, $GC_I_TYPE_BOOTS, $GC_I_TYPE_BOW, $GC_I_TYPE_CHESTPIECE, _
+				$GC_I_TYPE_OFFHAND, $GC_I_TYPE_GLOVES, $GC_I_TYPE_HAMMER, $GC_I_TYPE_HEADPIECE, $GC_I_TYPE_LEGGINS, _
+				$GC_I_TYPE_WAND, $GC_I_TYPE_SHIELD, $GC_I_TYPE_STAFF, $GC_I_TYPE_SWORD, $GC_I_TYPE_DAGGERS, _
+				$GC_I_TYPE_SCYTHE, $GC_I_TYPE_SPEAR
+			Return True
+	EndSwitch
+	Return False
+EndFunc
+
+; Identify and salvage bag items that were not in $a_s_Before.
+Func Leveler_IdentifyAndSalvageLoot($a_s_Before)
+	If Map_GetInstanceInfo("IsLoading") Then Return False
+	Local $l_i_Bag, $l_i_Slot, $l_p_Item, $l_i_ID, $l_i_Salvaged = 0
+	For $l_i_Bag = 1 To 4
+		If Item_GetBagPtr($l_i_Bag) = 0 Then ContinueLoop
+		For $l_i_Slot = 1 To Item_GetBagInfo($l_i_Bag, "Slots")
+			$l_p_Item = Item_GetItemBySlot($l_i_Bag, $l_i_Slot)
+			If $l_p_Item = 0 Then ContinueLoop
+			$l_i_ID = Item_GetItemInfoByPtr($l_p_Item, "ItemID")
+			If StringInStr($a_s_Before, "|" & $l_i_ID & "|") Then ContinueLoop
+			If Item_GetItemInfoByPtr($l_p_Item, "IsIdentified") Then ContinueLoop
+			Item_IdentifyItem($l_p_Item, "Normal")
+		Next
+	Next
+
+	For $l_i_Bag = 1 To 4
+		If Item_GetBagPtr($l_i_Bag) = 0 Then ContinueLoop
+		For $l_i_Slot = 1 To Item_GetBagInfo($l_i_Bag, "Slots")
+			$l_p_Item = Item_GetItemBySlot($l_i_Bag, $l_i_Slot)
+			If $l_p_Item = 0 Then ContinueLoop
+			$l_i_ID = Item_GetItemInfoByPtr($l_p_Item, "ItemID")
+			If StringInStr($a_s_Before, "|" & $l_i_ID & "|") Then ContinueLoop
+			If Not Leveler_ShouldSalvageDrop($l_p_Item) Then ContinueLoop
+			If Item_SalvageItem($l_p_Item, "Standard", "Materials") Then
+				$l_i_Salvaged += 1
+				Sleep(250)
+			EndIf
+		Next
+	Next
+	If $l_i_Salvaged > 0 Then Out("[Move] Salvaged " & $l_i_Salvaged & " drop(s)")
 	Return True
 EndFunc
 
@@ -1197,6 +1287,7 @@ Func Leveler_InCinematic()
 	Return True
 EndFunc
 
+; True on the known cinematic map ids used after the scrying pool.
 Func Leveler_OnCinematicMap()
 	Local $l_i_Map = Map_GetMapID()
 	If $l_i_Map >= 679 And $l_i_Map <= 685 Then Return True
@@ -1273,6 +1364,7 @@ Func Leveler_GetScryingPool()
 	Return Leveler_GetNearestGadgetAt($EOTN_POOL_X, $EOTN_POOL_Y, 350)
 EndFunc
 
+; Debug log of living and gadget agents near the scrying pool.
 Func Leveler_LogPoolAgents($a_f_Range = 1500)
 	Local $l_i_Max = Agent_GetMaxAgents()
 	Local $i
@@ -1294,6 +1386,7 @@ Func Leveler_LogPoolAgents($a_f_Range = 1500)
 	If $l_i_Count = 0 Then Out("[Move] No living/gadget agents within " & $a_f_Range)
 EndFunc
 
+; Target an agent and wait until the client reports that target.
 Func Leveler_SelectAgent($a_i_Agent, $a_i_Timeout = 6000)
 	If $a_i_Agent = 0 Then Return False
 	Local $l_i_Id = Number(Agent_GetAgentInfo($a_i_Agent, "ID"))
@@ -1541,10 +1634,12 @@ Func Leveler_IsPunchoutMap($a_i_Map = 0)
 	Return $a_i_Map = $MAP_KILROY Or $a_i_Map = $MAP_FRONIS
 EndFunc
 
+; Wait until Punch the Clown has finished loading.
 Func Leveler_WaitKilroyInstance($a_i_Timeout = 45000)
 	Return Leveler_WaitPunchoutInstance($MAP_KILROY, $a_i_Timeout)
 EndFunc
 
+; Wait until a punch-out map is loaded and the client is ready.
 Func Leveler_WaitPunchoutInstance($a_i_MapID, $a_i_Timeout = 45000)
 	Local $l_h_Timer = TimerInit()
 	While TimerDiff($l_h_Timer) < $a_i_Timeout
@@ -1555,144 +1650,356 @@ Func Leveler_WaitPunchoutInstance($a_i_MapID, $a_i_Timeout = 45000)
 	Return Map_GetMapID() = $a_i_MapID And Not Map_GetInstanceInfo("IsLoading") And Not Map_GetInstanceInfo("IsOutpost") And Leveler_ClientIsReady()
 EndFunc
 
-Func Leveler_BrassKnucklesEquipped()
-	If Item_GetInventoryInfo("WeaponSet0WeaponModelID") = $MODEL_BRASS_KNUCKLES Then Return True
-	If Item_GetInventoryInfo("WeaponSet1WeaponModelID") = $MODEL_BRASS_KNUCKLES Then Return True
-	Return False
-EndFunc
-
-; Brass knuckles only exist / can be worn after Punch the Clown (map 703) is loaded.
+; Same equip path as the Clairvoyant Staff: wait for bags, then Leveler_EquipModel.
 Func Leveler_EquipBrassKnuckles()
 	If Not Leveler_IsPunchoutMap() Then
 		Out("[Kilroy] Brass knuckles wait until the punch-out map is loaded")
 		Return False
 	EndIf
-	If Leveler_BrassKnucklesEquipped() Then
+	If Leveler_IsModelEquipped($MODEL_BRASS_KNUCKLES) Then
 		Out("[Kilroy] Brass knuckles already equipped")
 		Return True
 	EndIf
-	Local $l_i_Attempt
-	For $l_i_Attempt = 1 To 10
-		If Not Leveler_IsPunchoutMap() Then Return False
-		Local $l_i_Item = Item_FindItemByModelID($MODEL_BRASS_KNUCKLES)
-		If $l_i_Item = 0 Then
-			Out("[Kilroy] Brass knuckles not in bags yet. Waiting.")
-			Sleep(500)
-			ContinueLoop
-		EndIf
-		Item_EquipItem($l_i_Item)
-		Sleep(600)
-		If Leveler_BrassKnucklesEquipped() Then
-			Out("[Kilroy] Brass knuckles equipped")
-			Return True
-		EndIf
+	; Granted on Punch the Clown load — same wait used after crafting the staff.
+	If Not Leveler_WaitForBagModel($MODEL_BRASS_KNUCKLES, 20000) Then
+		Out("[Kilroy] Brass knuckles (24897) did not appear in bags")
+		Return False
+	EndIf
+	Out("[Kilroy] Equipping brass knuckles via Leveler_EquipModel(24897)")
+	Return Leveler_EquipModel($MODEL_BRASS_KNUCKLES)
+EndFunc
+
+; UtilityAI brawling skills (API/Plugins/UtilityAI + GwAu3_Const_Skill):
+; BRAWLING, BLOCK, JAB1/2, STRAIGHT_RIGHT, HOOK1/2, UPPERCUT, COMBO_PUNCH, HEADBUTT, STAND_UP.
+Func Leveler_IsBrawlingSkillID($a_i_SkillID)
+	Return $a_i_SkillID >= $GC_I_SKILL_ID_BRAWLING And $a_i_SkillID <= $GC_I_SKILL_ID_STAND_UP
+EndFunc
+
+; True when the live bar has Stand Up or another brawling skill.
+Func Leveler_HasBrawlingBar()
+	If Skill_GetSkillbarInfo(8, "SkillID") = $GC_I_SKILL_ID_STAND_UP Then Return True
+	Local $i
+	For $i = 1 To 7
+		If Leveler_IsBrawlingSkillID(Skill_GetSkillbarInfo($i, "SkillID")) Then Return True
 	Next
-	Out("[Kilroy] Failed to equip brass knuckles")
 	Return False
 EndFunc
 
-; Knuckles swap the bar to brawling skills. Recache after that or UtilityAI keeps the old bar.
+; After Cache_SkillBar: read UAI static IDs, find STAND UP + fight slots (Punch_Out order).
+Func Leveler_ResolveKilroySlotsFromCache()
+	$g_i_KilroyStandUpSlot = 0
+	$g_ai_KilroyFightSlots[0] = 0
+
+	Local $i
+	For $i = 1 To 8
+		Local $l_i_ID = UAI_GetStaticSkillInfo($i, $GC_UAI_STATIC_SKILL_SkillID)
+		If $l_i_ID = 0 Then $l_i_ID = Skill_GetSkillbarInfo($i, "SkillID")
+		If $l_i_ID = $GC_I_SKILL_ID_STAND_UP Then
+			$g_i_KilroyStandUpSlot = $i
+			ExitLoop
+		EndIf
+	Next
+	If $g_i_KilroyStandUpSlot = 0 Then $g_i_KilroyStandUpSlot = 8
+
+	; Punch_Out_Farm / Kilroy.au3 cast order: slots 1,2,3,5,6,4 (skip STAND UP).
+	Local $l_ai_Order[6] = [1, 2, 3, 5, 6, 4]
+	Local $l_i_Count = 0
+	For $i = 0 To 5
+		Local $l_i_Slot = $l_ai_Order[$i]
+		Local $l_i_ID = UAI_GetStaticSkillInfo($l_i_Slot, $GC_UAI_STATIC_SKILL_SkillID)
+		If $l_i_ID = 0 Then $l_i_ID = Skill_GetSkillbarInfo($l_i_Slot, "SkillID")
+		If Not Leveler_IsBrawlingSkillID($l_i_ID) Then ContinueLoop
+		If $l_i_ID = $GC_I_SKILL_ID_STAND_UP Then ContinueLoop
+		$l_i_Count += 1
+		$g_ai_KilroyFightSlots[$l_i_Count] = $l_i_Slot
+	Next
+	$g_ai_KilroyFightSlots[0] = $l_i_Count
+	Return $l_i_Count > 0
+EndFunc
+
+; Cache_SkillBar() from UtilityAI, then resolve brawling slots from the static cache.
 Func Leveler_PrepareKilroyCombat()
 	$g_b_CombatMode = True
 	$g_b_UAIReady = False
 	$g_i_LastUAIMap = 0
+	$g_ai_KilroyFightSlots[0] = 0
 	If Not Leveler_WaitBrawlingBar() Then
 		Out("[Kilroy] Brawling skills are not on the bar yet")
 		Return False
 	EndIf
-	If Not Leveler_CacheUtilityAIForMap(Map_GetMapID()) Then Return False
-	Out("[Kilroy] Brawling bar cached: " & Skill_GetSkillbarInfo(1, "SkillID") & ", " & Skill_GetSkillbarInfo(2, "SkillID") & ", " & Skill_GetSkillbarInfo(3, "SkillID") & ", " & Skill_GetSkillbarInfo(8, "SkillID"))
+
+	; UtilityAI only: Cache_SkillBar (binds CanUse_Brawling* / BestTarget_Brawling*).
+	If Not Leveler_CacheUtilityAIForMap(Map_GetMapID()) Then
+		Out("[Kilroy] Cache_SkillBar failed")
+		Return False
+	EndIf
+	If Not Leveler_ResolveKilroySlotsFromCache() Then
+		Out("[Kilroy] No brawling fight skills in UtilityAI skill-bar cache")
+		Return False
+	EndIf
+
+	Local $l_s_Bar = "", $i
+	For $i = 1 To 8
+		If $i > 1 Then $l_s_Bar &= ", "
+		Local $l_i_ID = UAI_GetStaticSkillInfo($i, $GC_UAI_STATIC_SKILL_SkillID)
+		$l_s_Bar &= $i & "=" & $l_i_ID & "/" & $g_as_CanUseCache[$i]
+	Next
+	Out("[Kilroy] UtilityAI brawling cache: " & $l_s_Bar)
+	Out("[Kilroy] Fight slots=" & $g_ai_KilroyFightSlots[0] & " STAND UP slot=" & $g_i_KilroyStandUpSlot)
 	Return True
 EndFunc
 
+; Wait until the punch-out brawling bar replaces the normal bar.
 Func Leveler_WaitBrawlingBar($a_i_Timeout = 8000)
 	Local $l_h_Timer = TimerInit()
 	While TimerDiff($l_h_Timer) < $a_i_Timeout
 		If $g_b_LevelerPaused Then Return False
-		If Skill_GetSkillbarInfo(1, "SkillID") <> 0 Then Return True
+		If Leveler_HasBrawlingBar() Then Return True
 		Sleep(200)
 	WEnd
-	Return Skill_GetSkillbarInfo(1, "SkillID") <> 0
+	Return Leveler_HasBrawlingBar()
 EndFunc
 
-; Equip the inventory item with this model ID.
+; Equip an inventory model via the same helper as staff/armor.
 Func Leveler_EquipItemByModel($a_i_Model)
-	Local $l_i_Item = Item_FindItemByModelID($a_i_Model)
-	If $l_i_Item = 0 Then
-		Out("[Move] Item model " & $a_i_Model & " not in inventory")
-		Return False
-	EndIf
-	Item_EquipItem($l_i_Item)
-	Sleep(400)
+	Return Leveler_EquipModel($a_i_Model)
+EndFunc
+
+; Enemy filter for punch-out brawling (Allegiance enemy, living).
+Func Leveler_KilroyEnemyFilter($a_p_Agent)
+	If Agent_GetAgentInfo($a_p_Agent, "Allegiance") <> $GC_I_ALLEGIANCE_ENEMY Then Return False
+	If Agent_GetAgentInfo($a_p_Agent, "HP") <= 0 Then Return False
+	If Agent_GetAgentInfo($a_p_Agent, "IsDead") Then Return False
 	Return True
 EndFunc
 
-; Punch-out downstate: IsDead, knocked down, or HP gone. Skill 8 is the revive.
-Func Leveler_IsPunchoutDowned()
-	If Agent_GetAgentInfo(-2, "IsDead") Then Return True
-	If Agent_GetAgentInfo(-2, "IsKnockedDown") Then Return True
-	If Agent_GetAgentInfo(-2, "HP") <= 0 Then Return True
+; Nearest living enemy in punch-out range.
+Func Leveler_KilroyNearestFoe($a_i_Range = 1500)
+	Return GetAgents(-2, $a_i_Range, $GC_I_AGENT_TYPE_LIVING, 1, "Leveler_KilroyEnemyFilter")
+EndFunc
+
+; How many living enemies are inside punch-out range.
+Func Leveler_KilroyFoeCount($a_i_Range = 1200)
+	Return GetAgents(-2, $a_i_Range, $GC_I_AGENT_TYPE_LIVING, 0, "Leveler_KilroyEnemyFilter")
+EndFunc
+
+; UAI_CanUse checks recharge and adrenaline. CanUse_Brawling* then holds the jabs
+; while Straight Right or a finisher is ready, so the rest of the bar gets used.
+Func Leveler_KilroyUseSkill($a_i_Slot, $a_v_Target = -2, $a_i_Range = 300)
+	If Agent_GetAgentInfo(-2, "IsDead") Then Return False
+	Leveler_UAI_RefreshSkillCache()
+	If Not UAI_CanUse($a_i_Slot) Then Return False
+	If $a_i_Slot >= 1 And $a_i_Slot <= 8 And $g_as_CanUseCache[$a_i_Slot] <> "" Then
+		If Not Call($g_as_CanUseCache[$a_i_Slot]) Then Return False
+	EndIf
+	Return Leveler_UAI_UseSkillEx($a_i_Slot, $a_v_Target, $a_i_Range)
+EndFunc
+
+; The skillbar array entry moves when the character is knocked down. Re-find it without wiping CanUse.
+Func Leveler_RebindSkillbarPtr()
+	Local $l_p_Array = World_GetWorldInfo("SkillbarArray")
+	Local $l_i_Size = World_GetWorldInfo("SkillbarArraySize")
+	If $l_p_Array = 0 Or $l_i_Size = 0 Then Return False
+	Local $l_i_MyID = Agent_GetMyID()
+	Local $i
+	For $i = 0 To $l_i_Size - 1
+		Local $l_p_Ptr = $l_p_Array + (0xBC * $i)
+		If Memory_Read($l_p_Ptr, "long") = $l_i_MyID Then
+			$g_p_StaticSkillbarPtr = $l_p_Ptr
+			Return True
+		EndIf
+	Next
 	Return False
 EndFunc
 
-; Spam skill 8 until standing. Stay in Punch the Clown until the instance itself ends.
-; Traveling home on a knockdown hands the quest in before the clown is beaten.
-Func Leveler_HandleKilroyDeath()
-	If Not $g_b_KilroyMode And Not $g_b_FarmMode And Not Leveler_IsPunchoutMap() Then Return False
-	If Not Leveler_IsPunchoutDowned() Then Return False
+; True when the cached skill IDs and CanUse names still match the live bar.
+Func Leveler_KilroyCacheMatchesBar()
+	If Not $g_b_UAIReady Or $g_p_StaticSkillbarPtr = 0 Then Return False
+	If Memory_Read($g_p_StaticSkillbarPtr, "long") <> Agent_GetMyID() Then Return False
+	Local $i
+	For $i = 1 To 8
+		Local $l_i_Live = Skill_GetSkillbarInfo($i, "SkillID")
+		If $l_i_Live <> UAI_GetStaticSkillInfo($i, $GC_UAI_STATIC_SKILL_SkillID) Then Return False
+		If $l_i_Live <> 0 And $g_as_CanUseCache[$i] = "" Then Return False
+	Next
+	Return True
+EndFunc
 
-	Out("[Kilroy] Downed. Using skill 8 until revived.")
-	Local $l_h_Timer = TimerInit()
-	While Leveler_IsPunchoutDowned() And TimerDiff($l_h_Timer) < 30000
-		If $g_b_LevelerPaused Then Return True
-		If Not Leveler_IsPunchoutMap() Then Return True
-		Skill_UseSkill(8)
-		Sleep(50)
-	WEnd
-	If Leveler_IsPunchoutDowned() Then
-		Out("[Kilroy] Still down after skill 8. Retrying next tick.")
+; Rebuild the brawling cache only once the skills are back on the bar. An empty downed bar must not wipe it.
+Func Leveler_EnsureKilroySkillCache()
+	Leveler_RebindSkillbarPtr()
+	If Leveler_KilroyCacheMatchesBar() Then
+		UAI_CacheDynamicSkillbarInfo()
 		Return True
 	EndIf
-	Out("[Kilroy] Revived")
-	Sleep(300)
+	If Not Leveler_HasBrawlingBar() Then Return False
+	If Not Leveler_CacheSkillBarNow() Then Return False
+	$g_i_LastUAIMap = Map_GetMapID()
+	$g_b_UAIReady = True
+	Leveler_ResolveKilroySlotsFromCache()
+	UAI_CacheDynamicSkillbarInfo()
+	Out("[Kilroy] Skill cache restored")
 	Return True
+EndFunc
+
+; Energy at 0: skill 8 until the bar is 100% of MaxEnergy. The maximum grows as foes die.
+Func Leveler_KilroyRecoverTick()
+	If Map_GetInstanceInfo("IsLoading") Then Return False
+	If Not $g_b_KilroyMode And Not $g_b_FarmMode And Not Leveler_IsPunchoutMap() Then Return False
+
+	Local $l_f_Energy = Agent_GetAgentInfo(-2, "CurrentEnergy")
+	Local $l_f_MaxEnergy = Agent_GetAgentInfo(-2, "MaxEnergy")
+	Local $l_b_EnergyFull = ($l_f_MaxEnergy > 0 And $l_f_Energy >= $l_f_MaxEnergy) Or Agent_GetAgentInfo(-2, "EnergyPercent") >= 1
+
+	If $l_f_Energy <= 0 And Not $g_b_KilroyRecovery Then
+		$g_b_KilroyRecovery = True
+		Out("[Kilroy] Energy is 0. Using skill 8 until energy is 100% (" & $l_f_MaxEnergy & ").")
+	EndIf
+	If Not $g_b_KilroyRecovery Then Return False
+
+	; Keep the dynamic recharge/adrenaline cache on the live skillbar while downed.
+	Leveler_RebindSkillbarPtr()
+	If $g_p_StaticSkillbarPtr <> 0 Then UAI_CacheDynamicSkillbarInfo()
+
+	If $l_b_EnergyFull Then
+		$g_b_KilroyRecovery = False
+		Leveler_EnsureKilroySkillCache()
+		Out("[Kilroy] Energy is 100% (" & Round($l_f_Energy, 1) & "/" & $l_f_MaxEnergy & "). Stood up. Continuing combat.")
+		Return False
+	EndIf
+
+	Skill_UseSkill(8, -2)
+	Return True
+EndFunc
+
+; One pass of Punch_Out_Farm Brawling_Fight: stand up, close to 150, then slots 1, 2, 3, 5, 6, 4.
+Func Leveler_KilroyCombatTick($a_i_Range = 1500, $a_b_Chase = True)
+	If Map_GetInstanceInfo("IsLoading") Then Return False
+	If Not Leveler_IsPunchoutMap() Then Return False
+	; Energy at 0: skill 8 until the bar is 100%, then slots 1, 2, 3, 5, 6, 4.
+	If Leveler_KilroyRecoverTick() Then Return True
+
+	If Not Leveler_EnsureKilroySkillCache() Then
+		If $g_b_UAIReady And Not Leveler_HasBrawlingBar() Then Return True
+		If Not Leveler_PrepareKilroyCombat() Then Return False
+	EndIf
+
+	Local $l_p_Target = Leveler_KilroyNearestFoe($a_i_Range)
+	If $l_p_Target = 0 Then Return False
+	Local $l_i_Target = Agent_ConvertID($l_p_Target)
+	If $l_i_Target = 0 Then Return False
+
+	Local $l_f_Dist = Agent_GetDistance($l_i_Target, Agent_GetMyID())
+	If $l_f_Dist > 150 Then
+		Agent_ChangeTarget($l_p_Target)
+		Agent_Attack($l_p_Target)
+		Sleep(250)
+		$l_f_Dist = Agent_GetDistance($l_i_Target, Agent_GetMyID())
+		If $a_b_Chase And $l_f_Dist > 200 Then
+			Map_Move(Agent_GetAgentInfo($l_i_Target, "X"), Agent_GetAgentInfo($l_i_Target, "Y"), 0)
+		EndIf
+		Return True
+	EndIf
+
+	If $l_f_Dist >= 300 Then Return True
+
+	UAI_UpdateAgentCache($a_i_Range)
+	Leveler_UAI_RefreshSkillCache()
+	; Auto-attack sets the skill-bar cast flag and only builds adrenaline. Skills still have to go out.
+	If Not Leveler_UAI_GetIsIdle(-2) Then Return True
+	If Agent_GetAgentInfo($l_p_Target, "HP") <= 0 Then Return True
+
+	If Agent_GetCurrentTarget() <> $l_i_Target Then
+		Agent_ChangeTarget($l_p_Target)
+		Agent_Attack($l_p_Target)
+		Sleep(250)
+	EndIf
+
+	Local $l_ai_Order[6] = [1, 2, 3, 5, 6, 4]
+	Local $l_i_Count = $g_ai_KilroyFightSlots[0]
+	Local $i
+	If $l_i_Count > 0 Then
+		For $i = 1 To $l_i_Count
+			If Leveler_KilroyUseSkill($g_ai_KilroyFightSlots[$i], $l_i_Target, 300) Then Return True
+		Next
+	Else
+		For $i = 0 To 5
+			If Leveler_KilroyUseSkill($l_ai_Order[$i], $l_i_Target, 300) Then Return True
+		Next
+	EndIf
+	Return True
+EndFunc
+
+; Walk to X/Y. In punch-out, clear foes with the Punch_Out_Farm brawling loop, then resume.
+Func Leveler_MoveAndFight($a_f_X, $a_f_Y, $a_i_ArriveRange = 250, $a_i_TimeoutMS = 120000)
+	If $g_b_LevelerPaused Then Return False
+	Local $l_i_StartMap = Map_GetMapID()
+	Local $l_h_Timer = TimerInit()
+	Local $l_h_MoveRefresh = TimerInit()
+	Local $l_i_Plane = Agent_GetAgentInfo(-2, "Plane")
+	; Randomize=0 — Map_Move(..., 50) re-rolls the target every call and looks like stutter-stepping.
+	Map_MoveLayer($a_f_X, $a_f_Y, $l_i_Plane)
+
+	While TimerDiff($l_h_Timer) < $a_i_TimeoutMS
+		If $g_b_LevelerPaused Then Return False
+		If Map_GetMapID() <> $l_i_StartMap Then Return True
+		If Leveler_LeaveFarmAtLevel20() Then Return True
+		; A move cancels Stand Up. Stay on skill 8 from energy 0 until energy is 100%.
+		If Leveler_IsPunchoutMap() And ($g_b_KilroyRecovery Or Agent_GetAgentInfo(-2, "CurrentEnergy") <= 0) Then
+			Leveler_KilroyRecoverTick()
+			Sleep(50)
+			ContinueLoop
+		EndIf
+
+		If Agent_GetDistanceToXY($a_f_X, $a_f_Y) <= $a_i_ArriveRange Then Return True
+
+		; Punch_Out_Farm Brawling_ClearArea: fight anything within 1500, then resume the walk.
+		If Leveler_IsPunchoutMap() And Leveler_KilroyFoeCount(1500) > 0 Then
+			Local $l_h_Fight = TimerInit()
+			While (Leveler_KilroyFoeCount(1500) > 0 Or $g_b_KilroyRecovery) And TimerDiff($l_h_Fight) < 180000
+				If $g_b_LevelerPaused Or Map_GetMapID() <> $l_i_StartMap Then ExitLoop
+				If Map_GetInstanceInfo("IsLoading") Then ExitLoop
+				If Leveler_LeaveFarmAtLevel20() Then Return True
+				Leveler_KilroyCombatTick(1500, True)
+				Sleep(50)
+			WEnd
+			If $g_b_KilroyRecovery Then ContinueLoop
+			If Not Map_GetInstanceInfo("IsLoading") Then Leveler_LootNearby(0, 1200, 2500)
+			Map_MoveLayer($a_f_X, $a_f_Y, Agent_GetAgentInfo(-2, "Plane"))
+			$l_h_MoveRefresh = TimerInit()
+		ElseIf TimerDiff($l_h_MoveRefresh) > 2000 Then
+			Map_MoveLayer($a_f_X, $a_f_Y, Agent_GetAgentInfo(-2, "Plane"))
+			$l_h_MoveRefresh = TimerInit()
+		EndIf
+
+		Sleep(100)
+	WEnd
+	If Map_GetMapID() <> $l_i_StartMap Then Return True
+	Return Agent_GetDistanceToXY($a_f_X, $a_f_Y) <= $a_i_ArriveRange
+EndFunc
+
+; Stand Up while energy reads 0. Combat continues once energy is 100% of the current maximum.
+Func Leveler_IsPunchoutDowned()
+	Return $g_b_KilroyRecovery Or Agent_GetAgentInfo(-2, "CurrentEnergy") <= 0
+EndFunc
+
+; One stand-up tick. Callers keep looping; a move during this cancels skill 8.
+Func Leveler_HandleKilroyDeath()
+	Return Leveler_KilroyRecoverTick()
 EndFunc
 #EndRegion Punch Out
 
 #Region Recovery
 ; Resign, return to outpost, retry the current step.
 
-; Resign or travel back after a wipe. Kilroy/farm recoveries return to Gunnar's.
+; Resign or travel back after a wipe. Punch-out stays in the instance and stands up.
 Func Leveler_RecoverWipe()
 	$g_b_SpiritRiftWatch = False
 	$g_b_UAIReady = False
 	$g_i_LastUAIMap = 0
-	If $g_b_FarmMode Then
-		Out("[Recover] Wiped during Punch-Out farm. Returning to Gunnar's Hold.")
-		Sleep(2000)
-		If Map_GetMapID() <> $MAP_GUNNAR Then
-			If Not Leveler_Travel($MAP_GUNNAR) Then
-				Chat_SendChat("resign", "/")
-				Sleep(1200)
-				Leveler_ReturnFromDefeat()
-			EndIf
-		EndIf
-		$g_b_KilroyMode = True
-		Out("[Recover] Farm wipe handled. Retrying Kilroy Punch-Out Extravaganza.")
-		Return True
-	EndIf
-	If $g_b_KilroyMode Then
-		Out("[Recover] Wiped during Kilroy. Returning to Gunnar's Hold.")
-		$g_b_KilroyMode = False
-		Sleep(2000)
-		If Map_GetMapID() <> $MAP_GUNNAR Then
-			If Not Leveler_Travel($MAP_GUNNAR) Then
-				Chat_SendChat("resign", "/")
-				Sleep(1200)
-				Leveler_ReturnFromDefeat()
-			EndIf
-		EndIf
-		Out("[Recover] Kilroy wipe handled. Retrying Punch the Clown.")
+	If $g_b_FarmMode Or $g_b_KilroyMode Or Leveler_IsPunchoutMap() Then
+		Out("[Recover] Downed in punch-out. Staying in the instance and using skill 8.")
+		Leveler_HandleKilroyDeath()
 		Return True
 	EndIf
 

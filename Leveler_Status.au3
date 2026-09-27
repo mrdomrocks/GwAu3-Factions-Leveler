@@ -313,13 +313,22 @@ Func Leveler_MastersBurdenDone()
 	Return False
 EndFunc
 
-; Punch the Clown (#858) must be taken and handed in. Gunnar's Hold alone does not unlock Kilroy.
+; Punch the Clown (#858). Settled means the one dialog already decided: instance entered and fought, or the map stayed and Punch-Out took over.
+; Punch-Out Extravaganza (#856) is only in the log after Kilroy is unlocked.
 Func Leveler_PunchClownDone()
+	If $g_b_PunchClownSettled Then Return True
+	If Leveler_HasQuest($QUEST_PUNCH_EXTRAVAGANZA) Then Return True
 	If Leveler_HasIncompleteQuest($QUEST_PUNCH_CLOWN) Then Return False
 	If Leveler_HasQuest($QUEST_PUNCH_CLOWN) Then Return False
 	If Leveler_IsQuestDone($QUEST_PUNCH_CLOWN) Then Return True
 	If Leveler_QuestFinished($QUEST_PUNCH_CLOWN) Then Return True
 	Return False
+EndFunc
+
+; Mark Punch the Clown finished so it is not offered again this run.
+Func Leveler_SettlePunchClown()
+	$g_b_PunchClownSettled = True
+	Leveler_MarkQuestDone($QUEST_PUNCH_CLOWN, True)
 EndFunc
 
 ; Against the Destroyers is out of the log and Keiran's Bow is owned. HoM map unlock is not enough.
@@ -331,6 +340,7 @@ Func Leveler_HomHeroQuestReady($a_i_QuestID)
 	Return False
 EndFunc
 
+; True when Missing Vanguard, Northern Allies, and Knowledgeable Asura are done.
 Func Leveler_HomHeroesTalked()
 	If Not Leveler_HomHeroQuestReady($QUEST_MISSING_VANGUARD) Then Return False
 	If Not Leveler_HomHeroQuestReady($QUEST_NORTHERN_ALLIES) Then Return False
@@ -338,6 +348,7 @@ Func Leveler_HomHeroesTalked()
 	Return True
 EndFunc
 
+; True once this character has reached Gunnar's Hold or a later outpost.
 Func Leveler_ReachedGunnarsHold()
 	If $g_b_ReachedGunnar Then Return True
 	Local $l_i_Map = Map_GetMapID()
@@ -378,6 +389,7 @@ Func Leveler_EotnPoolReady()
 	Return False
 EndFunc
 
+; An Unwelcome Guest is handed in, or the character is already past Seitung.
 Func Leveler_UnwelcomeGuestDone()
 	If Leveler_HasIncompleteQuest($QUEST_UNWELCOME) Then Return False
 	If Leveler_ReachedGunnarsHold() Then Return True
@@ -422,6 +434,7 @@ Func Leveler_XunlaiUnlocked()
 	Return False
 EndFunc
 
+; Remember that this character has already paid for Xunlai storage.
 Func Leveler_MarkXunlaiUnlocked()
 	$g_b_XunlaiUnlocked = True
 EndFunc
@@ -506,12 +519,107 @@ Func Leveler_WarningTheTenguDone()
 	Return False
 EndFunc
 
+; Kaineng / Wajjun maps where The Search for a Cure is played.
+Func Leveler_IsCureAreaMap($a_i_Map = -1)
+	If $a_i_Map < 0 Then $a_i_Map = Map_GetMapID()
+	Switch $a_i_Map
+		Case $MAP_KAINENG, $MAP_WAJJUN, $MAP_BUKDEK, $MAP_KAINENG_DOCKS, $MAP_MARKETPLACE
+			Return True
+	EndSwitch
+	Return False
+EndFunc
+
+; Towns that only exist after The Search for a Cure has been left behind.
+Func Leveler_IsPastCureMap($a_i_Map = -1)
+	If $a_i_Map < 0 Then $a_i_Map = Map_GetMapID()
+	Switch $a_i_Map
+		Case $MAP_BOREAL, $MAP_TUNNELS, $MAP_ICE_CLIFF, $MAP_EOTN, $MAP_HOM, $MAP_AB, $MAP_NORRHART, _
+				$MAP_GUNNAR, $MAP_KILROY, $MAP_FRONIS, $MAP_LIONS_ARCH, $MAP_LIONS_GATE, $MAP_BEJUNKAN, _
+				$MAP_KAMADAN, $MAP_SUN_DOCKS, $MAP_CONSULATE, $MAP_DOCKS, $MAP_KC_SUNSPEARS, $MAP_BLOODSTONE_FEN
+			Return True
+	EndSwitch
+	Return False
+EndFunc
+
+; #336 is in the log, including reward-ready.
+Func Leveler_Quest336Seen()
+	If Leveler_HasIncompleteQuest($QUEST_SEARCH_CURE) Then Return True
+	If Leveler_HasQuest($QUEST_SEARCH_CURE) Then Return True
+	Return False
+EndFunc
+
+; Max armor is on and the Seitung set is gone, so Destroy Seitung is finished.
+Func Leveler_MaxArmorPastSeitung()
+	If Leveler_HasSeitungArmor() Then Return False
+	If Leveler_ArmorSetEquipped(Leveler_GetMaxArmorPieces()) Then Return True
+	If Leveler_HasMaxArmor() Then Return True
+	Return False
+EndFunc
+
+; True when this character is already beyond The Search for a Cure.
+Func Leveler_IsPastSearchCure($a_i_IncomingStep)
+	If Leveler_Quest336Seen() Then Return False
+	If $g_ab_StepDone[$LEVELER_STEP_CURE] Then Return True
+	If Leveler_HasQuest($QUEST_BROTHER_TOSAI) Or Leveler_IsQuestDone($QUEST_BROTHER_TOSAI) Then Return True
+	If $g_b_MoxUnlocked Or $g_b_OliasUnlocked Then Return True
+	If $a_i_IncomingStep > $LEVELER_STEP_CURE And $a_i_IncomingStep < $LEVELER_STEP_COUNT Then Return True
+	If Leveler_IsPastCureMap() Then Return True
+	Return False
+EndFunc
+
+; True when a restart must stay on The Search for a Cure.
+Func Leveler_IsAtSearchCure($a_i_IncomingStep)
+	If Leveler_Quest336Seen() Then Return True
+	If $g_b_CureStepLocked Then Return True
+	If $a_i_IncomingStep = $LEVELER_STEP_CURE Then Return True
+	If Leveler_IsCureAreaMap() And Leveler_MaxArmorPastSeitung() Then Return True
+	Return False
+EndFunc
+
+; Last word in the status check. Earlier steps, including An Unwelcome Guest, stay closed.
+Func Leveler_PinSearchForACure($a_i_IncomingStep)
+	Local $l_i_Before
+	If Leveler_IsPastSearchCure($a_i_IncomingStep) Then
+		$g_b_CureStepLocked = False
+		For $l_i_Before = 0 To $LEVELER_STEP_CURE
+			$g_ab_StepDone[$l_i_Before] = True
+		Next
+		Leveler_MarkQuestDone($QUEST_UNWELCOME, True)
+		Leveler_MarkQuestDone($QUEST_MASTERS_BURDEN, True)
+		Out("[Status] Past The Search For A Cure. Earlier steps stay closed.")
+		Return
+	EndIf
+	If Not Leveler_IsAtSearchCure($a_i_IncomingStep) Then Return
+	$g_b_CureStepLocked = True
+	For $l_i_Before = 0 To $LEVELER_STEP_CURE - 1
+		$g_ab_StepDone[$l_i_Before] = True
+	Next
+	$g_ab_StepDone[$LEVELER_STEP_CURE] = False
+	Leveler_MarkQuestDone($QUEST_UNWELCOME, True)
+	Leveler_MarkQuestDone($QUEST_MASTERS_BURDEN, True)
+	Out("[Status] Staying on The Search For A Cure. Earlier steps are locked behind this quest.")
+EndFunc
+
+; Quest log can still be empty on the first tick after attach.
+Func Leveler_WaitForQuestLog()
+	If World_GetWorldInfo("QuestLogSize") > 0 Then Return True
+	Out("[Status] Quest log is empty. Waiting for it to load.")
+	Local $l_h_Wait = TimerInit()
+	While TimerDiff($l_h_Wait) < 2500
+		Sleep(200)
+		If World_GetWorldInfo("QuestLogSize") > 0 Then Return True
+	WEnd
+	Return False
+EndFunc
+
 #EndRegion Progress
 
 #Region Status Check
 ; Brief inventory / quest / map check. Greys finished steps and returns the first incomplete one.
 Func Leveler_StatusCheck()
 	Out("[Status] Checking character progress...")
+	Leveler_WaitForQuestLog()
+	Local $l_i_IncomingStep = $g_i_Step
 	Local $l_i_Map = Map_GetMapID()
 	Local $l_b_Cho = Map_IsMapUnlocked($MAP_CHO_OUTPOST) Or $l_i_Map = $MAP_CHO_OUTPOST Or $l_i_Map = $MAP_CHO_MISSION
 	Local $l_b_RanMusu = Map_IsMapUnlocked($MAP_RAN_MUSU) Or $l_i_Map = $MAP_RAN_MUSU Or $l_i_Map = $MAP_CHO_EXPLORABLE Or $l_i_Map = $MAP_KINYA
@@ -611,18 +719,6 @@ Func Leveler_StatusCheck()
 	$g_ab_StepDone[$LEVELER_STEP_MAX_ARMOR] = Leveler_ArmorSetEquipped(Leveler_GetMaxArmorPieces())
 	$g_ab_StepDone[$LEVELER_STEP_DESTROY_SEITUNG] = $g_ab_StepDone[$LEVELER_STEP_MAX_ARMOR] And Not $l_b_SeitungArmor
 	$g_ab_StepDone[$LEVELER_STEP_CURE] = Leveler_CureStepComplete()
-	; Max armor on the character means Burden through Destroy Seitung are behind us.
-	; Leave The Search For A Cure as the next step unless it is already finished.
-	If $g_ab_StepDone[$LEVELER_STEP_MAX_ARMOR] Then
-		$g_ab_StepDone[$LEVELER_STEP_BURDEN] = True
-		$g_ab_StepDone[$LEVELER_STEP_TO_KC] = True
-		$g_ab_StepDone[$LEVELER_STEP_SKILLS2] = True
-		$g_ab_StepDone[$LEVELER_STEP_DESTROY_SEITUNG] = True
-		Leveler_MarkQuestDone($QUEST_MASTERS_BURDEN, True)
-		If Not $g_ab_StepDone[$LEVELER_STEP_CURE] Then
-			Out("[Status] Max armor is equipped. A Master's Burden is complete. Next is The Search For A Cure.")
-		EndIf
-	EndIf
 	; Mox: in the party, AddHero works, or this character already reached EotN.
 	$g_ab_StepDone[$LEVELER_STEP_UNLOCK_MOX] = Leveler_HasMoxUnlocked()
 	$g_ab_StepDone[$LEVELER_STEP_TO_BOREAL] = Leveler_HasMoxUnlocked() And (Map_IsMapUnlocked($MAP_BOREAL) Or $l_i_Map = $MAP_BOREAL Or $l_i_Map = $MAP_ICE_CLIFF Or $l_b_Eotn) And $l_i_Map <> $MAP_TUNNELS
@@ -668,14 +764,20 @@ Func Leveler_StatusCheck()
 		$g_ab_StepDone[$LEVELER_STEP_UNLOCK_OLIAS] = False
 		Out("[Status] All for One and One for Justice needs Kamadan. Staying on Unlock Olias, not Seitung.")
 	EndIf
-	; Remaining secondaries are the last working step.
-	$g_ab_StepDone[$LEVELER_STEP_UNLOCK_PROFS] = Leveler_RemainingSecondariesUnlocked()
-	Out("[Status] Unlocked professions=0x" & Hex(Leveler_UnlockedProfessionFlags(), 8) & " (" & Leveler_ProfessionUnlockCount(Leveler_UnlockedProfessionFlags()) & "/10 selectable)  Secondaries done=" & $g_ab_StepDone[$LEVELER_STEP_UNLOCK_PROFS])
+	; Remaining secondaries are optional. Without the tick box, skip them so a broke character can finish.
+	If Leveler_WantsAllSecondaries() Then
+		$g_ab_StepDone[$LEVELER_STEP_UNLOCK_PROFS] = Leveler_RemainingSecondariesUnlocked()
+	Else
+		$g_ab_StepDone[$LEVELER_STEP_UNLOCK_PROFS] = True
+	EndIf
+	Out("[Status] Unlocked professions=0x" & Hex(Leveler_UnlockedProfessionFlags(), 8) & " (" & Leveler_ProfessionUnlockCount(Leveler_UnlockedProfessionFlags()) & "/10 selectable)  Secondaries done=" & $g_ab_StepDone[$LEVELER_STEP_UNLOCK_PROFS] & "  Unlock all=" & Leveler_WantsAllSecondaries())
 	$g_ab_StepDone[$LEVELER_STEP_DONE] = $g_ab_StepDone[$LEVELER_STEP_UNLOCK_PROFS]
-	If $g_ab_StepDone[$LEVELER_STEP_DONE] Then Out("[Status] Remaining secondary professions unlocked. Leveler is done.")
+	If $g_ab_StepDone[$LEVELER_STEP_DONE] And Leveler_WantsAllSecondaries() Then Out("[Status] Remaining secondary professions unlocked. Leveler is done.")
 
 	; No fill-forward. Account skills, storage pointers, and courtyard unlocks
 	; must not mark the tutorial quests complete on a fresh character.
+	; Cure pin is last so An Unwelcome Guest cannot reopen after the other rules.
+	Leveler_PinSearchForACure($l_i_IncomingStep)
 
 	Local $l_i_Next = Leveler_FirstIncompleteStep()
 	Out("[Status] Map " & $l_i_Map & "  Next step: " & $l_i_Next & " — " & $g_as_StepNames[$l_i_Next])

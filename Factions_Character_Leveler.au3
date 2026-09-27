@@ -1,4 +1,5 @@
 ; GUI, Start / Pause, and the main bot loop for the Factions character leveler.
+; AutoIt conversion of the Py4GW Factions Character Leveler by Apo and Wick (Divinus).
 ; Do not use #RequireAdmin: AutoIt exits the first process to relaunch elevated,
 ; and under Wine that relaunch fails so the window never appears.
 ; Includes GwAu3 API, Pathfinder, then Leveler_* modules (Const first).
@@ -12,6 +13,7 @@ Opt("TrayMenuMode", 1)
 #include "../../API/_GwAu3.au3"
 #include "../../API/Plugins/Pathfinder/_Pathfinder.au3"
 #include "Leveler_Const.au3"
+#include "Leveler_UtilityAI.au3"
 #include "Leveler_Move.au3"
 #include "Leveler_Quest.au3"
 #include "Leveler_Prof.au3"
@@ -68,6 +70,12 @@ $g_h_DebugCheckbox = GUICtrlCreateCheckbox("Debug", 286, 31, 56, 24)
 GUICtrlSetState($g_h_DebugCheckbox, $GUI_CHECKED)
 GUICtrlSetOnEvent($g_h_DebugCheckbox, "GuiButtonHandler")
 
+$g_h_InfKitCheckbox = GUICtrlCreateCheckbox("Inf Ident/Salvage Pick Up", 348, 31, 260, 24)
+GUICtrlSetOnEvent($g_h_InfKitCheckbox, "GuiButtonHandler")
+
+$g_h_UnlockProfsCheckbox = GUICtrlCreateCheckbox("Unlock All Secondary Professions", 24, 104, 250, 22)
+GUICtrlSetOnEvent($g_h_UnlockProfsCheckbox, "GuiButtonHandler")
+
 $g_h_StartButton = GUICtrlCreateButton("Start", 24, 72, 80, 25)
 GUICtrlSetOnEvent($g_h_StartButton, "GuiButtonHandler")
 
@@ -95,7 +103,7 @@ GUIRegisterMsg($WM_NOTIFY, "Leveler_WM_NOTIFY")
 
 Global Const $LEVELER_TAG_NMLVCUSTOMDRAW = $tagNMHDR & ";dword dwDrawStage;handle hdc;int Left;int Top;int Right;int Bottom;dword_ptr dwItemSpec;uint uItemState;lparam lItemlParam;dword clrText;dword clrTextBk;int iSubItem"
 
-$g_h_EditText = _GUICtrlRichEdit_Create($g_h_MainGui, "", 16, 112, 356, 348, BitOR($ES_AUTOVSCROLL, $ES_MULTILINE, $WS_VSCROLL, $ES_READONLY))
+$g_h_EditText = _GUICtrlRichEdit_Create($g_h_MainGui, "", 16, 132, 356, 328, BitOR($ES_AUTOVSCROLL, $ES_MULTILINE, $WS_VSCROLL, $ES_READONLY))
 _GUICtrlRichEdit_SetBkColor($g_h_EditText, $COLOR_WHITE)
 
 GUICtrlCreateGroup("", -99, -99, 1, 1)
@@ -172,8 +180,13 @@ Func StartBot()
 	$g_b_LevelerPaused = False
 	$g_b_LevelerFailed = False
 	$g_b_NeedStatusCheck = True
+	$g_b_PunchClownSettled = False
+	$g_b_InfKitsClaimed = False
+	$g_i_InfKitTravelFails = 0
+	$g_b_InfKitsNoSpace = False
 	$g_b_LostTreasureToTenguOnce = False
 	$g_b_ExplorableResume = True
+	$g_b_CureStepLocked = False
 	Leveler_RefreshQuestFlags(True)
 
 	Out("Initialized for: " & Player_GetCharName())
@@ -300,6 +313,21 @@ Func GuiButtonHandler()
 				Log_SetDebugMode(False)
 			EndIf
 
+		Case $g_h_InfKitCheckbox
+			If GetChecked($g_h_InfKitCheckbox) Then
+				$g_b_InfKitsClaimed = False
+				Out("Inf Ident/Salvage Pick Up is on. One trip to The Purveyor once the Great Temple of Balthazar is unlocked.")
+			Else
+				Out("Inf Ident/Salvage Pick Up is off.")
+			EndIf
+
+		Case $g_h_UnlockProfsCheckbox
+			If GetChecked($g_h_UnlockProfsCheckbox) Then
+				Out("Unlock All Secondary Professions is on. Trainers at the Great Temple will be paid.")
+			Else
+				Out("Unlock All Secondary Professions is off. That step will be skipped.")
+			EndIf
+
 		Case $GUI_EVENT_CLOSE
 			_Exit()
 	EndSwitch
@@ -319,6 +347,7 @@ Func Leveler_LogLine($a_s_Text, $a_i_Color = 0x000000)
 	_GUICtrlRichEdit_AppendText($g_h_EditText, $a_s_Text & @CRLF)
 EndFunc
 
+; GwAu3 log hook. Writes API messages into the GUI log pane.
 Func Leveler_LogCallback($a_s_Message, $a_i_MsgType, $a_s_Author)
 	Local $l_i_Color = 0x008000
 	Local $l_s_Type = "INFO"
