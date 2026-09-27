@@ -473,9 +473,9 @@ Global $g_b_ReachedGunnar = False
 Global $g_h_InfKitCheckbox = 0
 ; GUI option. Off unless ticked: trainer unlocks cost gold the character may not have.
 Global $g_h_UnlockProfsCheckbox = 0
-; GUI option. Sell white drops to a merchant. White gear is not identified.
+; GUI option. Sell merchant-sellable drops. Materials and equipped armor or weapons stay.
 Global $g_h_AutoSellCheckbox = 0
-; Outpost map where white drops were already offered to the merchant this visit.
+; Outpost map where drops were already offered to the merchant this visit.
 Global $g_i_WhiteSellMap = -1
 Global $g_b_InfKitsClaimed = False
 Global $g_i_InfKitTravelFails = 0

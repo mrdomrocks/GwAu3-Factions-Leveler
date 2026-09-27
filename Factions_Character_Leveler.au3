@@ -334,7 +334,7 @@ Func GuiButtonHandler()
 		Case $g_h_AutoSellCheckbox
 			If GetChecked($g_h_AutoSellCheckbox) Then
 				$g_i_WhiteSellMap = -1
-				Out("Auto Sell is on. White drops are sold to a merchant. They are not identified.")
+				Out("Auto Sell is on. Sellable drops go to a merchant. Materials and equipped armor and weapons stay.")
 			Else
 				Out("Auto Sell is off.")
 			EndIf

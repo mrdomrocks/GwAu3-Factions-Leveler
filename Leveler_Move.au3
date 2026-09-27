@@ -1137,7 +1137,7 @@ Func Leveler_GetGroundItemByModel($a_i_Model, $a_f_Range = 2500)
 	Return $l_i_Best
 EndFunc
 
-; Pick up nearby ground items and gold. White drops are sold later, in town.
+; Pick up nearby ground items and gold. Sellable drops are sold later, in town.
 Func Leveler_LootNearby($a_i_Model = 0, $a_f_Range = 2000, $a_i_Timeout = 10000)
 	Local $l_h_Timer = TimerInit()
 	Local $l_i_Picked = 0
@@ -1168,20 +1168,18 @@ Func Leveler_WantsAutoSell()
 	Return GetChecked($g_h_AutoSellCheckbox)
 EndFunc
 
-; Unequipped white weapons and armor. Blues, rares, materials, kits, and quest items stay.
-Func Leveler_IsWhiteSellDrop($a_p_Item)
+; Merchant-sellable drops of any rarity. Materials and equipped armor or weapons stay.
+Func Leveler_IsMerchantSellDrop($a_p_Item)
 	If $a_p_Item = 0 Then Return False
-	If Item_GetItemInfoByPtr($a_p_Item, "Customized") <> 0 Then Return False
 	If Item_GetItemInfoByPtr($a_p_Item, "Equipped") <> 0 Then Return False
-	If Item_GetItemInfoByPtr($a_p_Item, "Rarity") <> $GC_I_RARITY_WHITE Then Return False
+	If Item_GetItemInfoByPtr($a_p_Item, "IsMaterial") Then Return False
+	If Item_GetItemInfoByPtr($a_p_Item, "Value") <= 0 Then Return False
 	Switch Item_GetItemInfoByPtr($a_p_Item, "ItemType")
-		Case $GC_I_TYPE_LEADHAND, $GC_I_TYPE_AXE, $GC_I_TYPE_BOOTS, $GC_I_TYPE_BOW, $GC_I_TYPE_CHESTPIECE, _
-				$GC_I_TYPE_OFFHAND, $GC_I_TYPE_GLOVES, $GC_I_TYPE_HAMMER, $GC_I_TYPE_HEADPIECE, $GC_I_TYPE_LEGGINS, _
-				$GC_I_TYPE_WAND, $GC_I_TYPE_SHIELD, $GC_I_TYPE_STAFF, $GC_I_TYPE_SWORD, $GC_I_TYPE_DAGGERS, _
-				$GC_I_TYPE_SCYTHE, $GC_I_TYPE_SPEAR
-			Return True
+		Case $GC_I_TYPE_MATERIAL_AND_ZCOINS, $GC_I_TYPE_QUEST_ITEM, $GC_I_TYPE_KIT, _
+				$GC_I_TYPE_BAG, $GC_I_TYPE_GOLD_COINS, $GC_I_TYPE_BUNDLE, $GC_I_TYPE_KEY
+			Return False
 	EndSwitch
-	Return False
+	Return True
 EndFunc
 
 ; Nearest town NPC whose name is Merchant. Skips material traders.
@@ -1202,7 +1200,7 @@ Func Leveler_FindTownMerchant()
 	Return $l_i_Best
 EndFunc
 
-; Once per outpost visit, sell white drops. They are not identified.
+; Once per outpost visit, sell merchant-sellable drops. Materials and equipped gear stay.
 Func Leveler_MaybeSellWhiteDrops()
 	If Not Leveler_WantsAutoSell() Then Return True
 	If Not Leveler_IsOutpost() Or Map_GetInstanceInfo("IsLoading") Then
@@ -1217,7 +1215,7 @@ Func Leveler_MaybeSellWhiteDrops()
 		If Item_GetBagPtr($l_i_Bag) = 0 Then ContinueLoop
 		For $l_i_Slot = 1 To Item_GetBagInfo($l_i_Bag, "Slots")
 			$l_p_Item = Item_GetItemBySlot($l_i_Bag, $l_i_Slot)
-			If Not Leveler_IsWhiteSellDrop($l_p_Item) Then ContinueLoop
+			If Not Leveler_IsMerchantSellDrop($l_p_Item) Then ContinueLoop
 			If $l_i_Count >= UBound($l_ai_Ids) Then ReDim $l_ai_Ids[$l_i_Count + 16]
 			$l_ai_Ids[$l_i_Count] = Item_GetItemInfoByPtr($l_p_Item, "ItemID")
 			$l_i_Count += 1
@@ -1230,12 +1228,12 @@ Func Leveler_MaybeSellWhiteDrops()
 
 	Local $l_i_Merchant = Leveler_FindTownMerchant()
 	If $l_i_Merchant = 0 Then
-		Out("[Sell] No merchant in this outpost. White drops stay in the bags.")
+		Out("[Sell] No merchant in this outpost. Drops stay in the bags.")
 		$g_i_WhiteSellMap = Map_GetMapID()
 		Return True
 	EndIf
 
-	Out("[Sell] Selling " & $l_i_Count & " white drop(s)")
+	Out("[Sell] Selling " & $l_i_Count & " drop(s)")
 	If Not Leveler_MoveTo(Agent_GetAgentInfo($l_i_Merchant, "X"), Agent_GetAgentInfo($l_i_Merchant, "Y"), False) Then
 		Out("[Sell] Could not reach the merchant")
 		Return True
@@ -1251,14 +1249,14 @@ Func Leveler_MaybeSellWhiteDrops()
 	Local $i
 	For $i = 0 To $l_i_Count - 1
 		$l_p_Item = Item_GetItemPtr($l_ai_Ids[$i])
-		If Not Leveler_IsWhiteSellDrop($l_p_Item) Then ContinueLoop
+		If Not Leveler_IsMerchantSellDrop($l_p_Item) Then ContinueLoop
 		If Merchant_SellItem($l_ai_Ids[$i]) Then
 			$l_i_Sold += 1
 			Sleep(200)
 		EndIf
 	Next
 	$g_i_WhiteSellMap = Map_GetMapID()
-	Out("[Sell] Sold " & $l_i_Sold & " white drop(s)")
+	Out("[Sell] Sold " & $l_i_Sold & " drop(s)")
 	Return True
 EndFunc
 

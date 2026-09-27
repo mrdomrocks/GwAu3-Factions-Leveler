@@ -22,7 +22,7 @@ The main script is `Factions_Character_Leveler.au3`. It includes `../../API/_GwA
 
 **Inf Ident/Salvage Pick Up** claims the infinite kits from the Purveyor after the Great Temple can be traveled to.
 
-**Auto Sell** is off by default. Tick it to sell unequipped white weapons and armor to the town merchant. White gear is not identified. Blues, rares, materials, kits, and quest items stay in the bags.
+**Auto Sell** is off by default. Tick it to sell merchant-sellable drops in town. Materials and equipped armor and weapons stay in the bags. Kits, bags, and quest items stay as well.
 
 ## Scope
 
