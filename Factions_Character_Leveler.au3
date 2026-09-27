@@ -76,6 +76,9 @@ GUICtrlSetOnEvent($g_h_InfKitCheckbox, "GuiButtonHandler")
 $g_h_UnlockProfsCheckbox = GUICtrlCreateCheckbox("Unlock All Secondary Professions", 24, 104, 250, 22)
 GUICtrlSetOnEvent($g_h_UnlockProfsCheckbox, "GuiButtonHandler")
 
+$g_h_AutoSellCheckbox = GUICtrlCreateCheckbox("Auto Sell", 24, 128, 200, 22)
+GUICtrlSetOnEvent($g_h_AutoSellCheckbox, "GuiButtonHandler")
+
 $g_h_StartButton = GUICtrlCreateButton("Start", 24, 72, 80, 25)
 GUICtrlSetOnEvent($g_h_StartButton, "GuiButtonHandler")
 
@@ -103,7 +106,7 @@ GUIRegisterMsg($WM_NOTIFY, "Leveler_WM_NOTIFY")
 
 Global Const $LEVELER_TAG_NMLVCUSTOMDRAW = $tagNMHDR & ";dword dwDrawStage;handle hdc;int Left;int Top;int Right;int Bottom;dword_ptr dwItemSpec;uint uItemState;lparam lItemlParam;dword clrText;dword clrTextBk;int iSubItem"
 
-$g_h_EditText = _GUICtrlRichEdit_Create($g_h_MainGui, "", 16, 132, 356, 328, BitOR($ES_AUTOVSCROLL, $ES_MULTILINE, $WS_VSCROLL, $ES_READONLY))
+$g_h_EditText = _GUICtrlRichEdit_Create($g_h_MainGui, "", 16, 154, 356, 306, BitOR($ES_AUTOVSCROLL, $ES_MULTILINE, $WS_VSCROLL, $ES_READONLY))
 _GUICtrlRichEdit_SetBkColor($g_h_EditText, $COLOR_WHITE)
 
 GUICtrlCreateGroup("", -99, -99, 1, 1)
@@ -326,6 +329,14 @@ Func GuiButtonHandler()
 				Out("Unlock All Secondary Professions is on. Trainers at the Great Temple will be paid.")
 			Else
 				Out("Unlock All Secondary Professions is off. That step will be skipped.")
+			EndIf
+
+		Case $g_h_AutoSellCheckbox
+			If GetChecked($g_h_AutoSellCheckbox) Then
+				$g_i_WhiteSellMap = -1
+				Out("Auto Sell is on. White drops are sold to a merchant. They are not identified.")
+			Else
+				Out("Auto Sell is off.")
 			EndIf
 
 		Case $GUI_EVENT_CLOSE

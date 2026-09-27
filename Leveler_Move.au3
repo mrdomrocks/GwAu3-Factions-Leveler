@@ -1137,24 +1137,8 @@ Func Leveler_GetGroundItemByModel($a_i_Model, $a_f_Range = 2500)
 	Return $l_i_Best
 EndFunc
 
-; Item IDs already in the backpack, so salvage only touches what was just picked up.
-Func Leveler_BagItemIDList()
-	Local $l_s_List = "|"
-	Local $l_i_Bag, $l_i_Slot, $l_p_Item
-	For $l_i_Bag = 1 To 4
-		If Item_GetBagPtr($l_i_Bag) = 0 Then ContinueLoop
-		For $l_i_Slot = 1 To Item_GetBagInfo($l_i_Bag, "Slots")
-			$l_p_Item = Item_GetItemBySlot($l_i_Bag, $l_i_Slot)
-			If $l_p_Item = 0 Then ContinueLoop
-			$l_s_List &= Item_GetItemInfoByPtr($l_p_Item, "ItemID") & "|"
-		Next
-	Next
-	Return $l_s_List
-EndFunc
-
-; Pick up nearby ground items and gold, then identify and salvage the new drops.
+; Pick up nearby ground items and gold. White drops are sold later, in town.
 Func Leveler_LootNearby($a_i_Model = 0, $a_f_Range = 2000, $a_i_Timeout = 10000)
-	Local $l_s_Before = Leveler_BagItemIDList()
 	Local $l_h_Timer = TimerInit()
 	Local $l_i_Picked = 0
 	While TimerDiff($l_h_Timer) < $a_i_Timeout
@@ -1171,21 +1155,25 @@ Func Leveler_LootNearby($a_i_Model = 0, $a_f_Range = 2000, $a_i_Timeout = 10000)
 		Sleep(400)
 		$l_i_Picked += 1
 	WEnd
-	If $l_i_Picked > 0 Then Out("[Move] Looted " & $l_i_Picked & " item(s)")
-	If $l_i_Picked > 0 And Not $g_b_KilroyRecovery And Not Map_GetInstanceInfo("IsLoading") Then
-		Leveler_IdentifyAndSalvageLoot($l_s_Before)
+	If $l_i_Picked > 0 Then
+		Out("[Move] Looted " & $l_i_Picked & " item(s)")
+		$g_i_WhiteSellMap = -1
 	EndIf
 	Return True
 EndFunc
 
-; White and blue weapons and armor are salvaged for materials. Quest items, gold, kits, and rares are kept.
-Func Leveler_ShouldSalvageDrop($a_p_Item)
+; True when the Auto Sell box is ticked.
+Func Leveler_WantsAutoSell()
+	If $g_h_AutoSellCheckbox = 0 Then Return False
+	Return GetChecked($g_h_AutoSellCheckbox)
+EndFunc
+
+; Unequipped white weapons and armor. Blues, rares, materials, kits, and quest items stay.
+Func Leveler_IsWhiteSellDrop($a_p_Item)
 	If $a_p_Item = 0 Then Return False
 	If Item_GetItemInfoByPtr($a_p_Item, "Customized") <> 0 Then Return False
-	If Not Item_GetItemInfoByPtr($a_p_Item, "IsIdentified") Then Return False
-	If Not Item_GetItemInfoByPtr($a_p_Item, "IsMaterialSalvageable") Then Return False
-	Local $l_i_Rarity = Item_GetItemInfoByPtr($a_p_Item, "Rarity")
-	If $l_i_Rarity <> $GC_I_RARITY_WHITE And $l_i_Rarity <> $GC_I_RARITY_BLUE Then Return False
+	If Item_GetItemInfoByPtr($a_p_Item, "Equipped") <> 0 Then Return False
+	If Item_GetItemInfoByPtr($a_p_Item, "Rarity") <> $GC_I_RARITY_WHITE Then Return False
 	Switch Item_GetItemInfoByPtr($a_p_Item, "ItemType")
 		Case $GC_I_TYPE_LEADHAND, $GC_I_TYPE_AXE, $GC_I_TYPE_BOOTS, $GC_I_TYPE_BOW, $GC_I_TYPE_CHESTPIECE, _
 				$GC_I_TYPE_OFFHAND, $GC_I_TYPE_GLOVES, $GC_I_TYPE_HAMMER, $GC_I_TYPE_HEADPIECE, $GC_I_TYPE_LEGGINS, _
@@ -1196,37 +1184,81 @@ Func Leveler_ShouldSalvageDrop($a_p_Item)
 	Return False
 EndFunc
 
-; Identify and salvage bag items that were not in $a_s_Before.
-Func Leveler_IdentifyAndSalvageLoot($a_s_Before)
-	If Map_GetInstanceInfo("IsLoading") Then Return False
-	Local $l_i_Bag, $l_i_Slot, $l_p_Item, $l_i_ID, $l_i_Salvaged = 0
-	For $l_i_Bag = 1 To 4
-		If Item_GetBagPtr($l_i_Bag) = 0 Then ContinueLoop
-		For $l_i_Slot = 1 To Item_GetBagInfo($l_i_Bag, "Slots")
-			$l_p_Item = Item_GetItemBySlot($l_i_Bag, $l_i_Slot)
-			If $l_p_Item = 0 Then ContinueLoop
-			$l_i_ID = Item_GetItemInfoByPtr($l_p_Item, "ItemID")
-			If StringInStr($a_s_Before, "|" & $l_i_ID & "|") Then ContinueLoop
-			If Item_GetItemInfoByPtr($l_p_Item, "IsIdentified") Then ContinueLoop
-			Item_IdentifyItem($l_p_Item, "Normal")
-		Next
+; Nearest town NPC whose name is Merchant. Skips material traders.
+Func Leveler_FindTownMerchant()
+	Local $l_i_Best = 0
+	Local $l_f_Best = 999999
+	Local $l_i_Max = Agent_GetMaxAgents()
+	Local $i
+	For $i = 1 To $l_i_Max - 1
+		If Not Leveler_IsTalkNpc($i) Then ContinueLoop
+		If Agent_GetAgentInfo($i, "Name") <> "Merchant" Then ContinueLoop
+		Local $l_f_Dist = Agent_GetDistance($i)
+		If $l_f_Dist < $l_f_Best Then
+			$l_f_Best = $l_f_Dist
+			$l_i_Best = $i
+		EndIf
 	Next
+	Return $l_i_Best
+EndFunc
 
+; Once per outpost visit, sell white drops. They are not identified.
+Func Leveler_MaybeSellWhiteDrops()
+	If Not Leveler_WantsAutoSell() Then Return True
+	If Not Leveler_IsOutpost() Or Map_GetInstanceInfo("IsLoading") Then
+		$g_i_WhiteSellMap = -1
+		Return True
+	EndIf
+	If $g_i_WhiteSellMap = Map_GetMapID() Then Return True
+
+	Local $l_ai_Ids[32]
+	Local $l_i_Bag, $l_i_Slot, $l_p_Item, $l_i_Count = 0
 	For $l_i_Bag = 1 To 4
 		If Item_GetBagPtr($l_i_Bag) = 0 Then ContinueLoop
 		For $l_i_Slot = 1 To Item_GetBagInfo($l_i_Bag, "Slots")
 			$l_p_Item = Item_GetItemBySlot($l_i_Bag, $l_i_Slot)
-			If $l_p_Item = 0 Then ContinueLoop
-			$l_i_ID = Item_GetItemInfoByPtr($l_p_Item, "ItemID")
-			If StringInStr($a_s_Before, "|" & $l_i_ID & "|") Then ContinueLoop
-			If Not Leveler_ShouldSalvageDrop($l_p_Item) Then ContinueLoop
-			If Item_SalvageItem($l_p_Item, "Standard", "Materials") Then
-				$l_i_Salvaged += 1
-				Sleep(250)
-			EndIf
+			If Not Leveler_IsWhiteSellDrop($l_p_Item) Then ContinueLoop
+			If $l_i_Count >= UBound($l_ai_Ids) Then ReDim $l_ai_Ids[$l_i_Count + 16]
+			$l_ai_Ids[$l_i_Count] = Item_GetItemInfoByPtr($l_p_Item, "ItemID")
+			$l_i_Count += 1
 		Next
 	Next
-	If $l_i_Salvaged > 0 Then Out("[Move] Salvaged " & $l_i_Salvaged & " drop(s)")
+	If $l_i_Count = 0 Then
+		$g_i_WhiteSellMap = Map_GetMapID()
+		Return True
+	EndIf
+
+	Local $l_i_Merchant = Leveler_FindTownMerchant()
+	If $l_i_Merchant = 0 Then
+		Out("[Sell] No merchant in this outpost. White drops stay in the bags.")
+		$g_i_WhiteSellMap = Map_GetMapID()
+		Return True
+	EndIf
+
+	Out("[Sell] Selling " & $l_i_Count & " white drop(s)")
+	If Not Leveler_MoveTo(Agent_GetAgentInfo($l_i_Merchant, "X"), Agent_GetAgentInfo($l_i_Merchant, "Y"), False) Then
+		Out("[Sell] Could not reach the merchant")
+		Return True
+	EndIf
+	$l_i_Merchant = Leveler_FindTownMerchant()
+	If $l_i_Merchant = 0 Then Return True
+	Agent_ChangeTarget($l_i_Merchant)
+	Sleep(150)
+	Agent_GoNPC($l_i_Merchant)
+	Sleep(400)
+
+	Local $l_i_Sold = 0
+	Local $i
+	For $i = 0 To $l_i_Count - 1
+		$l_p_Item = Item_GetItemPtr($l_ai_Ids[$i])
+		If Not Leveler_IsWhiteSellDrop($l_p_Item) Then ContinueLoop
+		If Merchant_SellItem($l_ai_Ids[$i]) Then
+			$l_i_Sold += 1
+			Sleep(200)
+		EndIf
+	Next
+	$g_i_WhiteSellMap = Map_GetMapID()
+	Out("[Sell] Sold " & $l_i_Sold & " white drop(s)")
 	Return True
 EndFunc
 

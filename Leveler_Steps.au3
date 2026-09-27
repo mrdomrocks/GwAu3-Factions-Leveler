@@ -23,6 +23,7 @@ Func Leveler_ExecuteStep($a_i_Step)
 		$a_i_Step = $LEVELER_STEP_CURE
 	EndIf
 	If Not Leveler_MaybeClaimInfiniteKits() Then Return False
+	Leveler_MaybeSellWhiteDrops()
 	If Not Leveler_EnsureStepOutpost($a_i_Step) Then Return False
 	If Leveler_IsWiped() Then
 		Out("[Step] Wipe detected before '" & $g_as_StepNames[$a_i_Step] & "'. Recovering.")
