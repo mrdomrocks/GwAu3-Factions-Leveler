@@ -56,8 +56,8 @@ GUICtrlCreateGroup("Factions Leveler  -  through remaining secondary professions
 
 Global $g_h_NameCombo
 If $GC_B_LOAD_LOGGED_CHARS Then
-	$g_h_NameCombo = GUICtrlCreateCombo($g_s_MainCharName, 24, 32, 180, 25, BitOR($CBS_DROPDOWN, $CBS_AUTOHSCROLL))
-	GUICtrlSetData(-1, Scanner_GetLoggedCharNames())
+	$g_h_NameCombo = GUICtrlCreateCombo("", 24, 32, 180, 25, BitOR($CBS_DROPDOWN, $CBS_AUTOHSCROLL))
+	Leveler_FillNameCombo()
 Else
 	$g_h_NameCombo = GUICtrlCreateInput($g_s_MainCharName, 24, 32, 180, 25)
 EndIf
@@ -119,6 +119,12 @@ Out("Factions leveler through remaining secondary professions.")
 Out("Pathing: GwAu3 Pathfinder plugin + GWPathfinder.dll")
 Out("Run AutoIt3 x86 with Guild Wars launched.")
 If Not IsAdmin() Then Out("Not running as admin. If the client cannot be read, start AutoIt as administrator.")
+Local $l_s_ListedChar = Leveler_NormCharName(GUICtrlRead($g_h_NameCombo))
+If $l_s_ListedChar = "" Then
+	Out("No character was read from Guild Wars. Log in, then press Refresh.")
+Else
+	Out("Character listed: " & $l_s_ListedChar)
+EndIf
 Out("")
 
 ; GwAu3 Log_Message scrolls this control with Edit APIs. That crashes AutoIt on a RichEdit.
@@ -147,27 +153,122 @@ WEnd
 #EndRegion Main Loop
 
 #Region Bot
+; Drop a trailing NUL and surrounding whitespace from a character name.
+Func Leveler_NormCharName($a_s_Name)
+	Local $l_i_Nul = StringInStr($a_s_Name, Chr(0))
+	If $l_i_Nul > 0 Then $a_s_Name = StringLeft($a_s_Name, $l_i_Nul - 1)
+	Return StringStripWS($a_s_Name, 3)
+EndFunc
+
+Func Leveler_NamesMatch($a_s_A, $a_s_B)
+	$a_s_A = Leveler_NormCharName($a_s_A)
+	$a_s_B = Leveler_NormCharName($a_s_B)
+	If $a_s_A = "" Or $a_s_B = "" Then Return False
+	Return StringCompare($a_s_A, $a_s_B, 1) = 0
+EndFunc
+
+; Put logged-in character names in the combo and select one. Returns the selected name.
+Func Leveler_FillNameCombo()
+	Local $l_s_Names = Scanner_GetLoggedCharNames()
+	GUICtrlSetData($g_h_NameCombo, "")
+	If $l_s_Names = "" Then Return ""
+	Local $l_s_Default = $l_s_Names
+	Local $l_i_Bar = StringInStr($l_s_Names, "|")
+	If $l_i_Bar > 1 Then $l_s_Default = StringLeft($l_s_Names, $l_i_Bar - 1)
+	If $g_s_MainCharName <> "" Then $l_s_Default = $g_s_MainCharName
+	GUICtrlSetData($g_h_NameCombo, $l_s_Names, $l_s_Default)
+	Return Leveler_NormCharName(GUICtrlRead($g_h_NameCombo))
+EndFunc
+
+; Resolve gw.exe to a PID. One logged-in client is used when the combo text does not match.
+Func Leveler_FindGwPid($a_s_Wanted, ByRef $a_s_Seen)
+	$a_s_Wanted = Leveler_NormCharName($a_s_Wanted)
+	Local $l_as_Procs = ProcessList("gw.exe")
+	Local $l_i_Count = 0
+	If IsArray($l_as_Procs) Then $l_i_Count = $l_as_Procs[0][0]
+	Local $l_ai_NamedPids[1]
+	Local $l_as_Named[1]
+	Local $l_i_Named = 0
+	Local $l_i_OnlyPid = 0
+	$a_s_Seen = ""
+
+	For $i = 1 To $l_i_Count
+		Local $l_i_Pid = Number($l_as_Procs[$i][1])
+		Memory_Open($l_i_Pid)
+		Local $l_s_Name = ""
+		Local $l_b_Open = False
+		If $g_h_GWProcess <> 0 Then $l_b_Open = Scanner_InitializeSections()
+		If $l_b_Open Then
+			Scanner_ScanForCharname()
+			$l_s_Name = Leveler_NormCharName(Player_GetCharName())
+			If $l_i_OnlyPid = 0 Then
+				$l_i_OnlyPid = $l_i_Pid
+			Else
+				$l_i_OnlyPid = -1
+			EndIf
+		EndIf
+		Memory_Close()
+		If $a_s_Seen <> "" Then $a_s_Seen &= ", "
+		$a_s_Seen &= "pid " & $l_i_Pid
+		If $l_s_Name <> "" Then
+			$a_s_Seen &= " '" & $l_s_Name & "'"
+			$l_i_Named += 1
+			ReDim $l_ai_NamedPids[$l_i_Named]
+			ReDim $l_as_Named[$l_i_Named]
+			$l_ai_NamedPids[$l_i_Named - 1] = $l_i_Pid
+			$l_as_Named[$l_i_Named - 1] = $l_s_Name
+		Else
+			$a_s_Seen &= " (no character name)"
+		EndIf
+		If $a_s_Wanted <> "" And Leveler_NamesMatch($l_s_Name, $a_s_Wanted) Then Return $l_i_Pid
+	Next
+
+	If $l_i_Named = 1 Then
+		If $a_s_Wanted <> "" And Not Leveler_NamesMatch($l_as_Named[0], $a_s_Wanted) Then
+			Out("[Init] Using the only logged-in character '" & $l_as_Named[0] & "' for combo '" & $a_s_Wanted & "'.")
+		EndIf
+		Return $l_ai_NamedPids[0]
+	EndIf
+	If $l_i_OnlyPid > 0 Then
+		Out("[Init] Character name was not readable. Attaching to the only Guild Wars process " & $l_i_OnlyPid & ".")
+		Return $l_i_OnlyPid
+	EndIf
+	Return SetError(1, 0, 0)
+EndFunc
+
 ; Attach to the Guild Wars client, reset run flags, and start StatusCheck.
 Func StartBot()
-	Local $l_s_MainCharName = GUICtrlRead($g_h_NameCombo)
-	Local $l_i_Init = 0
-	If $l_s_MainCharName = "" Then
-		$l_i_Init = Core_Initialize(ProcessExists("gw.exe"), True)
-	ElseIf $g_i_ProcessID Then
-		Local $l_i_ProcIdInt = Number($g_i_ProcessID, 2)
-		$l_i_Init = Core_Initialize($l_i_ProcIdInt, True)
+	Local $l_s_MainCharName = Leveler_NormCharName(GUICtrlRead($g_h_NameCombo))
+	Local $l_s_Seen = ""
+	Local $l_i_Pid = 0
+	If $g_i_ProcessID Then
+		$l_i_Pid = Number($g_i_ProcessID)
 	Else
-		$l_i_Init = Core_Initialize($l_s_MainCharName, True)
+		$l_i_Pid = Leveler_FindGwPid($l_s_MainCharName, $l_s_Seen)
 	EndIf
-	If $l_i_Init = 0 Then
-		Local $l_i_Err = @error
+	If $l_i_Pid = 0 Then
 		Local $l_s_Why = "Guild Wars is not running."
-		If $l_i_Err = 2 Then $l_s_Why = "Pattern scan failed. Guild Wars may have updated, or AutoIt needs to run as administrator."
-		If $l_s_MainCharName <> "" And $l_i_Err <> 2 Then $l_s_Why = "Could not find a Guild Wars client named '" & $l_s_MainCharName & "'."
+		If $l_s_MainCharName <> "" Then $l_s_Why = "Could not find a Guild Wars client named '" & $l_s_MainCharName & "'."
+		If $l_s_Seen <> "" Then $l_s_Why &= " Saw: " & $l_s_Seen & "."
 		Out("[Init] " & $l_s_Why)
 		MsgBox(16, "Error", $l_s_Why)
 		Return
 	EndIf
+
+	$g_p_BasePointer = 0
+	$g_h_GWWindow = 0
+	Out("[Init] Attaching to pid " & $l_i_Pid & ".")
+	Core_Initialize($l_i_Pid, True)
+	If $g_h_GWWindow = 0 Then $g_h_GWWindow = Scanner_GetHwnd($l_i_Pid)
+	; A missing window handle used to look like "no client" after a successful scan.
+	If $g_h_GWProcess = 0 Or $g_p_BasePointer = 0 Then
+		Local $l_s_Why = "Pattern scan failed. Guild Wars may have updated, or AutoIt needs to run as administrator."
+		If $g_h_GWProcess = 0 Then $l_s_Why = "Opened pid " & $l_i_Pid & " but could not read Guild Wars. Run AutoIt as administrator."
+		Out("[Init] " & $l_s_Why)
+		MsgBox(16, "Error", $l_s_Why)
+		Return
+	EndIf
+	If $g_h_GWWindow = 0 Then Out("[Init] Memory is attached. The game window was not found, so key presses may not land.")
 
 	GUICtrlSetState($g_h_NameCombo, $GUI_DISABLE)
 	GUICtrlSetState($g_h_RefreshButton, $GUI_DISABLE)
@@ -299,8 +400,12 @@ Func GuiButtonHandler()
 			TogglePause()
 
 		Case $g_h_RefreshButton
-			GUICtrlSetData($g_h_NameCombo, "")
-			GUICtrlSetData($g_h_NameCombo, Scanner_GetLoggedCharNames())
+			Local $l_s_Refreshed = Leveler_FillNameCombo()
+			If $l_s_Refreshed = "" Then
+				Out("Refresh found no logged-in character.")
+			Else
+				Out("Character listed: " & $l_s_Refreshed)
+			EndIf
 
 		Case $g_h_OnTopCheckbox
 			If GetChecked($g_h_OnTopCheckbox) Then
