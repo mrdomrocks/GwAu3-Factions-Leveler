@@ -1,7 +1,8 @@
 ; GUI, Start / Pause, and the main bot loop for the Factions character leveler.
 ; AutoIt conversion of the Py4GW Factions Character Leveler by Apo and Wick (Divinus).
-; Do not use #RequireAdmin: AutoIt exits the first process to relaunch elevated,
-; and under Wine that relaunch fails so the window never appears.
+; Do not use #RequireAdmin. AutoIt always exits to relaunch elevated, and under Wine
+; that relaunch never shows a window. Native Windows still needs an admin token to
+; read gw.exe, so Leveler_EnsureAdmin() relaunches only when this is not Wine.
 ; Includes GwAu3 API, Pathfinder, then Leveler_* modules (Const first).
 
 Opt("GUIOnEventMode", True)
@@ -9,6 +10,9 @@ Opt("GUICloseOnESC", False)
 Opt("ExpandVarStrings", 1)
 Opt("TrayAutoPause", 0)
 Opt("TrayMenuMode", 1)
+
+; Before GwAu3 loads: Windows relaunches elevated, Wine stays in this process.
+Leveler_EnsureAdmin()
 
 #include "../../API/_GwAu3.au3"
 #include "../../API/Plugins/Pathfinder/_Pathfinder.au3"
@@ -118,7 +122,11 @@ Out("Factions Character Leveler")
 Out("Factions leveler through remaining secondary professions.")
 Out("Pathing: GwAu3 Pathfinder plugin + GWPathfinder.dll")
 Out("Run AutoIt3 x86 with Guild Wars launched.")
-If Not IsAdmin() Then Out("Not running as admin. If the client cannot be read, start AutoIt as administrator.")
+If Leveler_IsWine() Then
+	Out("Wine detected. Admin elevation is skipped. Run this in the same prefix as Guild Wars.")
+ElseIf Not IsAdmin() Then
+	Out("Not running as admin. If the client cannot be read, start AutoIt as administrator.")
+EndIf
 Local $l_s_ListedChar = Leveler_NormCharName(GUICtrlRead($g_h_NameCombo))
 If $l_s_ListedChar = "" Then
 	Out("No character was read from Guild Wars. Log in, then press Refresh.")
@@ -322,6 +330,41 @@ Func TogglePause()
 EndFunc
 
 #EndRegion Bot
+
+#Region Platform
+; True when ntdll exports wine_get_version. Native Windows does not.
+Func Leveler_IsWine()
+	DllCall("ntdll.dll", "ptr", "wine_get_version")
+	Local $l_i_Err = @error
+	Return $l_i_Err = 0
+EndFunc
+
+; Leave this process and start an elevated copy on native Windows. Wine returns immediately.
+Func Leveler_EnsureAdmin()
+	If Leveler_IsWine() Or IsAdmin() Then Return
+	Local $l_i_Arg
+	For $l_i_Arg = 1 To $CmdLine[0]
+		If $CmdLine[$l_i_Arg] = "-elevated" Then
+			MsgBox(16, "Factions Character Leveler", "Windows needs this script to run as administrator so it can read Guild Wars." & @CRLF & "Start AutoIt with Run as administrator.")
+			Exit
+		EndIf
+	Next
+	Local $l_s_Args
+	If @Compiled Then
+		$l_s_Args = $CmdLineRaw
+	Else
+		$l_s_Args = '"' & @ScriptFullPath & '"'
+		If $CmdLineRaw <> "" Then $l_s_Args &= " " & $CmdLineRaw
+	EndIf
+	If $l_s_Args <> "" Then $l_s_Args &= " "
+	$l_s_Args &= "-elevated"
+	Local $l_i_Ret = ShellExecute(@AutoItExe, $l_s_Args, @ScriptDir, "runas")
+	If $l_i_Ret <= 32 Then
+		MsgBox(16, "Factions Character Leveler", "Windows needs this script to run as administrator so it can read Guild Wars." & @CRLF & "The elevation prompt was declined or could not be shown.")
+	EndIf
+	Exit
+EndFunc
+#EndRegion Platform
 
 #Region GUI Helpers
 ; Return the Progress list index the user has selected.
