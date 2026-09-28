@@ -349,13 +349,17 @@ Func Leveler_EnsureAdmin()
 			Exit
 		EndIf
 	Next
-	Local $l_s_Args
-	If @Compiled Then
-		$l_s_Args = $CmdLineRaw
-	Else
-		$l_s_Args = '"' & @ScriptFullPath & '"'
-		If $CmdLineRaw <> "" Then $l_s_Args &= " " & $CmdLineRaw
-	EndIf
+	; $CmdLineRaw also contains the script path, and SciTE prefixes AutoIt switches.
+	; $CmdLine is only the parameters this script received, so the elevated copy is started once.
+	Local $l_s_Args = ""
+	Local $l_s_One = ""
+	If Not @Compiled Then $l_s_Args = '"' & @ScriptFullPath & '"'
+	For $l_i_Arg = 1 To $CmdLine[0]
+		$l_s_One = $CmdLine[$l_i_Arg]
+		If StringInStr($l_s_One, " ") Or StringInStr($l_s_One, @TAB) Or $l_s_One = "" Then $l_s_One = '"' & $l_s_One & '"'
+		If $l_s_Args <> "" Then $l_s_Args &= " "
+		$l_s_Args &= $l_s_One
+	Next
 	If $l_s_Args <> "" Then $l_s_Args &= " "
 	$l_s_Args &= "-elevated"
 	Local $l_i_Ret = ShellExecute(@AutoItExe, $l_s_Args, @ScriptDir, "runas")
