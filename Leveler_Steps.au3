@@ -785,7 +785,11 @@ Func Leveler_Step_ChosMission()
 		Out("[Step] Already inside Minister Cho's Estate")
 	Else
 		If Map_GetMapID() <> $MAP_CHO_OUTPOST Or Not Map_GetInstanceInfo("IsOutpost") Then
-			If Not Leveler_Travel($MAP_CHO_OUTPOST) Then Return False
+			If Leveler_MissionPortalMap($MAP_CHO_OUTPOST, Map_GetMapID()) Then
+				If Not Leveler_ReturnToMissionOutpost($MAP_CHO_OUTPOST) Then Return False
+			Else
+				If Not Leveler_Travel($MAP_CHO_OUTPOST) Then Return False
+			EndIf
 		EndIf
 		If Not Leveler_WaitUntilMapReady() Then Return False
 		If Not Leveler_FormalIntroductionTurnedIn() Then
@@ -794,9 +798,11 @@ Func Leveler_Step_ChosMission()
 			Sleep(1200)
 		EndIf
 		; Stage 1: henchmen. Skill bar is already set — do not reload it.
-		Out("[Step] Add henchmen, then enter")
+		Out("[Step] Add henchmen, then zone out and back before the mission")
 		If Not Leveler_EnsureFormingPartyHenchmen(False) Then Return False
-		; Stage 2: native Ui_EnterChallenge.
+		; Stage 2: portal round-trip. Party packets plus Enter Challenge in this instance 007.
+		If Not Leveler_SettlePartyForMission($MAP_CHO_OUTPOST) Then Return False
+		; Stage 3: native Ui_EnterChallenge. Do not add or remove henchmen after the portal.
 		If Not Leveler_EnterMission("Minister Cho's Estate", $MAP_CHO_OUTPOST) Then Return False
 	EndIf
 	If Not Leveler_WaitUntilMapReady() Then Return False
@@ -1579,21 +1585,19 @@ Func Leveler_Step_ZenDaijunMission()
 		Out("[Step] Already inside Zen Daijun")
 	Else
 		If Map_GetMapID() <> $MAP_ZEN_OP Or Not Map_GetInstanceInfo("IsOutpost") Then
-			If Not Leveler_Travel($MAP_ZEN_OP) Then Return False
+			If Leveler_MissionPortalMap($MAP_ZEN_OP, Map_GetMapID()) Then
+				If Not Leveler_ReturnToMissionOutpost($MAP_ZEN_OP) Then Return False
+			Else
+				If Not Leveler_Travel($MAP_ZEN_OP) Then Return False
+			EndIf
 		EndIf
 		If Not Leveler_WaitUntilMapReady() Then Return False
-		; One Seitung Harbor round-trip refreshes the outpost before henchmen / Enter.
-		If Not $g_b_ZenSeitungBounceDone Then
-			Out("[Step] Rezoning Zen Daijun via Seitung Harbor before the mission")
-			If Not Leveler_Travel($MAP_SEITUNG) Then Return False
-			If Not Leveler_Travel($MAP_ZEN_OP) Then Return False
-			If Not Leveler_WaitUntilMapReady() Then Return False
-			$g_b_ZenSeitungBounceDone = True
-		EndIf
 		; Stage 1: henchmen. Skill bar is already set — do not reload it.
-		Out("[Step] Add henchmen, then enter")
+		Out("[Step] Add henchmen, then zone out and back before the mission")
 		If Not Leveler_PrepareMissionParty() Then Return False
-		; Stage 2: native Ui_EnterChallenge.
+		; Stage 2: portal round-trip. Party packets plus Enter Challenge in this instance 007.
+		If Not Leveler_SettlePartyForMission($MAP_ZEN_OP) Then Return False
+		; Stage 3: native Ui_EnterChallenge. Do not add or remove henchmen after the portal.
 		If Not Leveler_EnterMission("Zen Daijun", $MAP_ZEN_OP) Then Return False
 	EndIf
 	If Not Leveler_WaitUntilMapReady() Then Return False

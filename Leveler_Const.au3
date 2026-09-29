@@ -459,8 +459,6 @@ Global $g_b_KilroyRecovery = False
 Global $g_b_ConnectionLost = False
 ; Map ID where the Zen template was already applied this run.
 Global $g_i_ZenBarLoadedMap = 0
-; One Zen Daijun → Seitung Harbor → Zen Daijun bounce before mission henchmen.
-Global $g_b_ZenSeitungBounceDone = False
 ; One-time recovery after a completed Lost Treasure restart: path Cho -> Ran Musu -> Tengu.
 Global $g_b_LostTreasureToTenguOnce = False
 ; Set on Start only. Stay in an explorable after a client/script restart; do not block the next quest.

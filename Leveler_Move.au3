@@ -769,7 +769,7 @@ Func Leveler_StepAllowsMap($a_i_Step, $a_i_Map)
 			If Map_IsMapUnlocked($MAP_CHO_OUTPOST) Then Return $a_i_Map = $MAP_CHO_OUTPOST
 			Return $a_i_Map = $MAP_SHING_JEA Or $a_i_Map = $MAP_SUNQUA_VALE
 		Case $LEVELER_STEP_CHO_MISSION
-			Return $a_i_Map = $MAP_CHO_OUTPOST Or $a_i_Map = $MAP_CHO_MISSION Or $a_i_Map = $MAP_RAN_MUSU
+			Return $a_i_Map = $MAP_CHO_OUTPOST Or $a_i_Map = $MAP_CHO_MISSION Or $a_i_Map = $MAP_RAN_MUSU Or $a_i_Map = $MAP_SUNQUA_VALE Or $a_i_Map = $MAP_CHO_EXPLORABLE
 		Case $LEVELER_STEP_ATTR_1
 			Return $a_i_Map = $MAP_CHO_EXPLORABLE Or $a_i_Map = $MAP_KINYA
 		Case $LEVELER_STEP_TENGU
@@ -784,7 +784,7 @@ Func Leveler_StepAllowsMap($a_i_Step, $a_i_Map)
 			If Map_IsMapUnlocked($MAP_ZEN_OP) Then Return $a_i_Map = $MAP_ZEN_OP
 			Return $a_i_Map = $MAP_JAYA Or $a_i_Map = $MAP_HAIJU
 		Case $LEVELER_STEP_ZEN_MISSION
-			Return $a_i_Map = $MAP_ZEN_EXP Or $a_i_Map = $MAP_ZEN_OP Or $a_i_Map = $MAP_ZEN_MISSION
+			Return $a_i_Map = $MAP_ZEN_EXP Or $a_i_Map = $MAP_ZEN_OP Or $a_i_Map = $MAP_ZEN_MISSION Or $a_i_Map = $MAP_HAIJU
 		Case $LEVELER_STEP_TO_MARKET
 			If Map_IsMapUnlocked($MAP_MARKETPLACE) Then Return $a_i_Map = $MAP_MARKETPLACE
 			Return $a_i_Map = $MAP_KAINENG_DOCKS
