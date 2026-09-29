@@ -267,7 +267,6 @@ Func StartBot()
 	$g_h_GWWindow = 0
 	Out("[Init] Attaching to pid " & $l_i_Pid & ".")
 	Core_Initialize($l_i_Pid, True)
-	If $g_h_GWWindow = 0 Then $g_h_GWWindow = Scanner_GetHwnd($l_i_Pid)
 	; A missing window handle used to look like "no client" after a successful scan.
 	If $g_h_GWProcess = 0 Or $g_p_BasePointer = 0 Then
 		Local $l_s_Why = "Pattern scan failed. Guild Wars may have updated, or AutoIt needs to run as administrator."
@@ -276,7 +275,8 @@ Func StartBot()
 		MsgBox(16, "Error", $l_s_Why)
 		Return
 	EndIf
-	If $g_h_GWWindow = 0 Then Out("[Init] Memory is attached. The game window was not found, so key presses may not land.")
+	; Scanner_GetHwnd only accepts ArenaNet_Dx_Window_Class. Reforged often uses another class, so key lookup misses it.
+	Leveler_BindGameWindow($l_i_Pid)
 
 	GUICtrlSetState($g_h_NameCombo, $GUI_DISABLE)
 	GUICtrlSetState($g_h_RefreshButton, $GUI_DISABLE)
@@ -367,6 +367,153 @@ Func Leveler_EnsureAdmin()
 		MsgBox(16, "Factions Character Leveler", "Windows needs this script to run as administrator so it can read Guild Wars." & @CRLF & "The elevation prompt was declined or could not be shown.")
 	EndIf
 	Exit
+EndFunc
+
+; Keep a DX-class handle when it belongs to this pid. Otherwise search by title and size.
+Func Leveler_BindGameWindow($a_i_Pid)
+	Local $l_h = $g_h_GWWindow
+	If $l_h <> 0 And $a_i_Pid > 0 Then
+		Local $l_i_Have = Leveler_HwndPid($l_h)
+		If $l_i_Have <> 0 And $l_i_Have <> Number($a_i_Pid) Then $l_h = 0
+	EndIf
+	If $l_h = 0 Then $l_h = Scanner_GetHwnd($a_i_Pid)
+	If $l_h = 0 Then $l_h = Leveler_FindGameWindow($a_i_Pid)
+	If $l_h = 0 Then
+		Out("[Init] Memory is attached. The game window was not found, so key presses may not land.")
+		Return False
+	EndIf
+	$l_h = Leveler_PreferDxChild($l_h)
+	$g_h_GWWindow = $l_h
+	Local $l_s_Char = Leveler_NormCharName(Player_GetCharName())
+	If $l_s_Char <> "" Then
+		; Core_GetGuildWarsWindow looks up "Guild Wars - " plus this name. Reforged's own title does not match.
+		$g_s_MainCharName = $l_s_Char
+		WinSetTitle($g_h_GWWindow, "", "Guild Wars - " & $l_s_Char)
+	EndIf
+	; WinActivate hangs under Wine. Native Windows needs the game forward so ControlSend lands.
+	If Not Leveler_IsWine() Then WinActivate($g_h_GWWindow)
+	Out("[Init] Game window found. class=" & Leveler_WindowClass($g_h_GWWindow) & " title=[" & WinGetTitle($g_h_GWWindow) & "]")
+	Return True
+EndFunc
+
+; Process id that owns a window. GetWindowThreadProcessId still works when WinGetProcess does not.
+Func Leveler_HwndPid($a_h)
+	If $a_h = 0 Then Return 0
+	Local $l_a = DllCall("user32.dll", "dword", "GetWindowThreadProcessId", "hwnd", $a_h, "dword*", 0)
+	If IsArray($l_a) Then Return Number($l_a[2])
+	Return 0
+EndFunc
+
+; Window class name, or an empty string.
+Func Leveler_WindowClass($a_h)
+	Local $l_a = DllCall("user32.dll", "int", "GetClassNameW", "hwnd", $a_h, "wstr", "", "int", 256)
+	If IsArray($l_a) And $l_a[0] > 0 Then Return $l_a[2]
+	Return ""
+EndFunc
+
+; Client width and height of a window.
+Func Leveler_WindowClient($a_h, ByRef $a_i_W, ByRef $a_i_H)
+	$a_i_W = 0
+	$a_i_H = 0
+	Local $l_d = DllStructCreate("long left;long top;long right;long bottom")
+	Local $l_a = DllCall("user32.dll", "int", "GetClientRect", "hwnd", $a_h, "ptr", DllStructGetPtr($l_d))
+	If IsArray($l_a) And $l_a[0] Then
+		$a_i_W = Number(DllStructGetData($l_d, "right"))
+		$a_i_H = Number(DllStructGetData($l_d, "bottom"))
+	EndIf
+EndFunc
+
+; Higher is a better game window. Stubs score -1.
+Func Leveler_GameWindowScore($a_h)
+	If $a_h = 0 Then Return -1
+	Local $l_s_Class = Leveler_WindowClass($a_h)
+	Local $l_s_Title = WinGetTitle($a_h)
+	If StringInStr($l_s_Class, "IME") Or StringInStr($l_s_Class, "MSCTF") Or StringInStr($l_s_Class, "IoLookup") Then Return -1
+	If StringInStr($l_s_Title, "IoLookup") Then Return -1
+	Local $l_i_W = 0
+	Local $l_i_H = 0
+	Leveler_WindowClient($a_h, $l_i_W, $l_i_H)
+	Local $l_b_Named = StringInStr($l_s_Title, "Guild Wars") Or StringInStr($l_s_Title, "Reforged")
+	Local $l_b_Dx = ($l_s_Class = $GC_S_CLASS_DX_WINDOW)
+	If Not $l_b_Named And Not $l_b_Dx And ($l_i_W < 640 Or $l_i_H < 400) Then Return -1
+	If $l_i_W > 0 And $l_i_W < 32 And $l_i_H < 32 Then Return -1
+	Local $l_i_Score = 0
+	If $l_b_Dx Then $l_i_Score += 10000
+	If StringInStr($l_s_Title, "Guild Wars") Then $l_i_Score += 8000
+	If StringInStr($l_s_Title, "Reforged") Then $l_i_Score += 4000
+	If $l_i_W >= 640 And $l_i_H >= 400 Then $l_i_Score += 500 + Int(($l_i_W * $l_i_H) / 1000)
+	Return $l_i_Score
+EndFunc
+
+; Remember the highest-scoring window that belongs to this Guild Wars pid.
+Func Leveler_ConsiderGameWindow($a_h, $a_i_Pid, ByRef $a_h_Best, ByRef $a_i_Best, ByRef $a_s_Seen)
+	If $a_h = 0 Then Return
+	Local $l_s_Key = "|" & Hex($a_h) & "|"
+	If StringInStr($a_s_Seen, $l_s_Key) Then Return
+	$a_s_Seen &= $l_s_Key
+	Local $l_i_Pid = Leveler_HwndPid($a_h)
+	If $a_i_Pid > 0 And $l_i_Pid <> 0 And $l_i_Pid <> Number($a_i_Pid) Then Return
+	If $a_i_Pid > 0 And $l_i_Pid = 0 Then
+		Local $l_s_Title = WinGetTitle($a_h)
+		If Not StringInStr($l_s_Title, "Guild Wars") And Leveler_WindowClass($a_h) <> $GC_S_CLASS_DX_WINDOW Then Return
+	EndIf
+	Local $l_i_Score = Leveler_GameWindowScore($a_h)
+	If $l_i_Score > $a_i_Best Then
+		$a_i_Best = $l_i_Score
+		$a_h_Best = $a_h
+	EndIf
+EndFunc
+
+; Use a DX-class child when the top-level Reforged frame is only a wrapper.
+Func Leveler_PreferDxChild($a_h)
+	If $a_h = 0 Then Return 0
+	If Leveler_WindowClass($a_h) = $GC_S_CLASS_DX_WINDOW Then Return $a_h
+	Local $l_a = DllCall("user32.dll", "hwnd", "FindWindowExW", "hwnd", $a_h, "hwnd", 0, "wstr", $GC_S_CLASS_DX_WINDOW, "ptr", 0)
+	If IsArray($l_a) And $l_a[0] <> 0 Then Return $l_a[0]
+	Return $a_h
+EndFunc
+
+; Find the Guild Wars or Guild Wars Reforged window for this pid.
+Func Leveler_FindGameWindow($a_i_Pid)
+	Local $l_h_Best = 0
+	Local $l_i_Best = -1
+	Local $l_s_Seen = ""
+	Local $l_h_Dx = 0
+	Local $l_i_N = 0
+	While $l_i_N < 8
+		Local $l_a_Ex = DllCall("user32.dll", "hwnd", "FindWindowExW", "hwnd", 0, "hwnd", $l_h_Dx, "wstr", $GC_S_CLASS_DX_WINDOW, "ptr", 0)
+		If Not IsArray($l_a_Ex) Or $l_a_Ex[0] = 0 Or $l_a_Ex[0] = $l_h_Dx Then ExitLoop
+		$l_h_Dx = $l_a_Ex[0]
+		Leveler_ConsiderGameWindow($l_h_Dx, $a_i_Pid, $l_h_Best, $l_i_Best, $l_s_Seen)
+		$l_i_N += 1
+	WEnd
+
+	Local $l_as_Titles[2] = ["Guild Wars Reforged", "Guild Wars"]
+	Local $l_i_T = 0
+	For $l_i_T = 0 To 1
+		Local $l_a_Title = DllCall("user32.dll", "hwnd", "FindWindowW", "ptr", 0, "wstr", $l_as_Titles[$l_i_T])
+		If IsArray($l_a_Title) And $l_a_Title[0] <> 0 Then Leveler_ConsiderGameWindow($l_a_Title[0], $a_i_Pid, $l_h_Best, $l_i_Best, $l_s_Seen)
+	Next
+
+	Local $l_a_Class = WinList("[CLASS:" & $GC_S_CLASS_DX_WINDOW & "]")
+	If IsArray($l_a_Class) Then
+		Local $l_i_C = 1
+		For $l_i_C = 1 To Number($l_a_Class[0][0])
+			Leveler_ConsiderGameWindow($l_a_Class[$l_i_C][1], $a_i_Pid, $l_h_Best, $l_i_Best, $l_s_Seen)
+		Next
+	EndIf
+
+	; A full WinList hangs under Wine. Windows needs it when Reforged is not the DX class.
+	If Not Leveler_IsWine() Then
+		Local $l_a_Wins = WinList()
+		If IsArray($l_a_Wins) Then
+			Local $l_i_W = 1
+			For $l_i_W = 1 To $l_a_Wins[0][0]
+				Leveler_ConsiderGameWindow($l_a_Wins[$l_i_W][1], $a_i_Pid, $l_h_Best, $l_i_Best, $l_s_Seen)
+			Next
+		EndIf
+	EndIf
+	Return $l_h_Best
 EndFunc
 #EndRegion Platform
 

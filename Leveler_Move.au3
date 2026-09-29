@@ -104,7 +104,12 @@ Func Leveler_MoveTo($a_f_X, $a_f_Y, $a_b_Combat = False)
 			EndIf
 		EndIf
 		If Not $l_b_Ok And Map_GetMapID() = $l_i_StartMap And Agent_GetDistanceToXY($a_f_X, $a_f_Y) >= $LEVELER_ARRIVE_RANGE Then
-			Out("[Move] Pathfinder did not arrive; falling back to layer-aware direct move")
+			; Pathfinder_MoveTo aborts on a map-type flicker and then closes the DLL. Walk the mesh anyway.
+			Out("[Move] Pathfinder did not arrive; following the mesh")
+			$l_b_Ok = Leveler_FollowMesh($a_f_X, $a_f_Y, $a_b_Combat)
+		EndIf
+		If Not $l_b_Ok And Map_GetMapID() = $l_i_StartMap And Agent_GetDistanceToXY($a_f_X, $a_f_Y) >= $LEVELER_ARRIVE_RANGE Then
+			Out("[Move] Mesh walk did not arrive; falling back to layer-aware direct move")
 			$l_b_Ok = Leveler_MoveDirect($a_f_X, $a_f_Y, 90000, $a_b_Combat)
 		EndIf
 	Else
@@ -206,6 +211,41 @@ Func Leveler_SetHeroesBehavior($a_i_Behavior)
 		If Party_GetMyPartyHeroInfo($i, "AgentID") = 0 Then ContinueLoop
 		Ui_SetHeroBehavior($i, $a_i_Behavior)
 	Next
+EndFunc
+
+; Walk Pathfinder waypoints after Pathfinder_MoveTo returns early. Does not call Pathfinder_Shutdown.
+Func Leveler_FollowMesh($a_f_X, $a_f_Y, $a_b_Combat = False, $a_i_Timeout = 90000)
+	If $g_b_LevelerPaused Then Return False
+	Leveler_EnsurePathfinder()
+	Local $l_i_StartMap = Map_GetMapID()
+	Local $l_a_Path = Leveler_BuildRunPath($a_f_X, $a_f_Y, False)
+	If Not IsArray($l_a_Path) Or UBound($l_a_Path) = 0 Then Return False
+	Out("[Move] Mesh route to " & Round($a_f_X) & ", " & Round($a_f_Y) & " (" & UBound($l_a_Path) & " waypoints)")
+	Local $l_i_Index = 0
+	Local $l_h_Timer = TimerInit()
+	While TimerDiff($l_h_Timer) < $a_i_Timeout
+		If $g_b_LevelerPaused Then Return False
+		If Leveler_IsWiped() Then Return False
+		If Map_GetMapID() <> $l_i_StartMap Then Return True
+		If Agent_GetDistanceToXY($a_f_X, $a_f_Y) < $LEVELER_ARRIVE_RANGE Then Return True
+		While $l_i_Index < UBound($l_a_Path)
+			If Agent_GetDistanceToXY($l_a_Path[$l_i_Index][0], $l_a_Path[$l_i_Index][1]) >= 300 Then ExitLoop
+			$l_i_Index += 1
+		WEnd
+		Local $l_f_GoX = $a_f_X
+		Local $l_f_GoY = $a_f_Y
+		Local $l_i_GoLayer = Agent_GetAgentInfo(-2, "Plane")
+		If $l_i_Index < UBound($l_a_Path) Then
+			$l_f_GoX = $l_a_Path[$l_i_Index][0]
+			$l_f_GoY = $l_a_Path[$l_i_Index][1]
+			$l_i_GoLayer = $l_a_Path[$l_i_Index][2]
+		EndIf
+		If $a_b_Combat Then Leveler_CombatTick()
+		Map_MoveLayer($l_f_GoX, $l_f_GoY, $l_i_GoLayer)
+		Sleep(50)
+	WEnd
+	If Map_GetMapID() <> $l_i_StartMap Then Return True
+	Return Agent_GetDistanceToXY($a_f_X, $a_f_Y) < $LEVELER_ARRIVE_RANGE
 EndFunc
 
 ; Layer-aware direct move. Prefer Pathfinder_MoveTo; this is the fallback when mesh path fails.
