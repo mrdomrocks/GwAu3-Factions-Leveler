@@ -5,11 +5,6 @@
 
 Global $g_b_LevelerPathCombat = False
 
-; Name the restored fight core still calls. Forwards to the renamed weapon-set function.
-Func UAI_DeterminateWeaponSets()
-	Return UAI_DetermineWeaponSets()
-EndFunc
-
 ; True while skillbar+0xB0 says a bar skill is activating.
 Func UAI_GetIsCasting()
 	If $g_p_StaticSkillbarPtr = 0 Then Return False
