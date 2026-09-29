@@ -40,8 +40,8 @@ EndFunc
 #EndRegion Pathfinder
 
 #Region Movement
-; Pathfinder_MoveTo / Map_MoveLayer wrappers and portal exits.
-; Bridges need Pathfinder layers — plain Map_Move sticks on elevated paths.
+; Mesh walk / Map_MoveLayer wrappers and portal exits.
+; Bridges need the mesh layer of each waypoint. Rebuilding the route, or finishing on layer 0, walks back off the bridge.
 
 ; Fight in explorables and punch-out instances. Stay pacifist in outposts.
 Func Leveler_ShouldFightHere()
@@ -53,7 +53,8 @@ EndFunc
 
 ; $a_b_Combat True = fight while walking. False is ignored in explorables.
 ; Outposts never fight. Returns True if we arrived or the map changed.
-; Missions / explorables always prefer Pathfinder_MoveTo (Map_MoveLayer) so bridges work.
+; A loaded mesh is walked once, in order, on each waypoint's layer.
+; Pathfinder_MoveTo is not used: it rebuilds the path every second and ends on layer 0, which walks back and forth on a bridge.
 Func Leveler_MoveTo($a_f_X, $a_f_Y, $a_b_Combat = False)
 	If $g_b_LevelerPaused Then Return False
 	If $g_b_KilroyMode Or $g_b_FarmMode Or Leveler_IsPunchoutMap() Then Leveler_HandleKilroyDeath()
@@ -77,8 +78,6 @@ Func Leveler_MoveTo($a_f_X, $a_f_Y, $a_b_Combat = False)
 	Leveler_EnsurePathfinder()
 
 	Local $l_v_Obstacles = 0
-	; Aggro -1 so Pathfinder's UAI_Fight exits before UAI_UseSkills. Aggro 0 still runs when distance is 0.
-	Local $l_i_Aggro = -1
 	If $a_b_Combat Then
 		Leveler_PrepareCombatAI()
 		; Mission bridges are single-file. Enemy obstacles block A* on the only walkable strip.
@@ -86,28 +85,25 @@ Func Leveler_MoveTo($a_f_X, $a_f_Y, $a_b_Combat = False)
 	EndIf
 
 	$g_b_LevelerPathCombat = $a_b_Combat
-	Local $l_s_Callback = ""
-	If $a_b_Combat Or $g_b_SpiritRiftWatch Then $l_s_Callback = "Leveler_PathCombat"
 
 	Local $l_b_Ok = False
 	Local $l_b_HaveMesh = Pathfinder_IsMapAvailable($l_i_StartMap)
-	; Missions and explorables: always Pathfinder_MoveTo so waypoints use Map_MoveLayer.
-	If $l_b_HaveMesh Or $l_b_Mission Or $l_b_Explorable Then
-		If Not $l_b_HaveMesh Then
-			Out("[Move] No path mesh flag for map " & $l_i_StartMap & "; Pathfinder_MoveTo still used for layer-aware bridges")
-		EndIf
-		$l_b_Ok = Pathfinder_MoveTo($a_f_X, $a_f_Y, -1, $l_v_Obstacles, $l_i_Aggro, $LEVELER_FIGHT_RANGE_OUT, 0, $l_s_Callback)
+	If $l_b_HaveMesh Then
+		$l_b_Ok = Leveler_WalkMesh($a_f_X, $a_f_Y, $l_v_Obstacles, $a_b_Combat)
 		If Not $l_b_Ok And Map_GetMapID() = $l_i_StartMap And Agent_GetDistanceToXY($a_f_X, $a_f_Y) >= $LEVELER_ARRIVE_RANGE Then
 			If $l_v_Obstacles <> 0 Then
-				Out("[Move] Retrying Pathfinder without combat obstacles")
-				$l_b_Ok = Pathfinder_MoveTo($a_f_X, $a_f_Y, -1, 0, $l_i_Aggro, $LEVELER_FIGHT_RANGE_OUT, 0, $l_s_Callback)
+				Out("[Move] Retrying mesh route without combat obstacles")
+				$l_b_Ok = Leveler_WalkMesh($a_f_X, $a_f_Y, 0, $a_b_Combat)
 			EndIf
 		EndIf
 		If Not $l_b_Ok And Map_GetMapID() = $l_i_StartMap And Agent_GetDistanceToXY($a_f_X, $a_f_Y) >= $LEVELER_ARRIVE_RANGE Then
-			Out("[Move] Pathfinder did not arrive; falling back to layer-aware direct move")
+			Out("[Move] Mesh walk did not arrive; creeping the last stretch")
 			$l_b_Ok = Leveler_MoveDirect($a_f_X, $a_f_Y, 90000, $a_b_Combat)
 		EndIf
 	Else
+		If $l_b_Mission Or $l_b_Explorable Then
+			Out("[Move] No path mesh for map " & $l_i_StartMap & "; creeping across bridges on the current layer")
+		EndIf
 		$l_b_Ok = Leveler_MoveDirect($a_f_X, $a_f_Y, 90000, $a_b_Combat)
 	EndIf
 
@@ -187,6 +183,153 @@ Func Leveler_RunTo($a_f_X, $a_f_Y, $a_i_Timeout = 180000)
 	Return Agent_GetDistanceToXY($a_f_X, $a_f_Y) < $LEVELER_ARRIVE_RANGE
 EndFunc
 
+; One mesh route, walked in order. Do not rebuild it every second: the new first point is
+; often the ramp behind the character, and that is the bridge back-and-forth.
+Func Leveler_WalkMesh($a_f_X, $a_f_Y, $a_v_Obstacles, $a_b_Combat)
+	Local $l_i_StartMap = Map_GetMapID()
+	Local $l_a_Path = Leveler_BuildMeshPath($a_f_X, $a_f_Y, $a_v_Obstacles)
+	If UBound($l_a_Path) = 0 Then
+		Out("[Move] No mesh route to " & Round($a_f_X) & ", " & Round($a_f_Y))
+		Return False
+	EndIf
+	Out("[Move] Mesh route to " & Round($a_f_X) & ", " & Round($a_f_Y) & " (" & UBound($l_a_Path) & " waypoints)")
+
+	Local $l_i_Index = 0
+	Local $l_i_Layer = $l_a_Path[0][2]
+	Local $l_h_Timer = TimerInit()
+	Local $l_h_Stuck = TimerInit()
+	Local $l_f_StuckX = Agent_GetAgentInfo(-2, "X")
+	Local $l_f_StuckY = Agent_GetAgentInfo(-2, "Y")
+	Local $l_f_Best = Agent_GetDistanceToXY($a_f_X, $a_f_Y)
+	Local $l_h_Best = TimerInit()
+	Local $l_b_Creep = False
+	Local $l_b_Rebuilt = False
+	Local $l_i_Forced = 0
+
+	While TimerDiff($l_h_Timer) < 180000
+		If $g_b_LevelerPaused Then Return False
+		If Leveler_IsWiped() Then Return False
+		If Map_GetMapID() <> $l_i_StartMap Then Return True
+		If Agent_GetDistanceToXY($a_f_X, $a_f_Y) < $LEVELER_ARRIVE_RANGE Then Return True
+
+		If $a_b_Combat Or $g_b_SpiritRiftWatch Then
+			Local $l_b_Fighting = $a_b_Combat And Leveler_ShouldFightHere() And UAI_CountEnemyInPartyAggroRange($LEVELER_AGGRO) > 0
+			Leveler_PathCombat()
+			If $l_b_Fighting Then
+				$l_h_Best = TimerInit()
+				$l_f_Best = Agent_GetDistanceToXY($a_f_X, $a_f_Y)
+				$l_h_Stuck = TimerInit()
+				$l_f_StuckX = Agent_GetAgentInfo(-2, "X")
+				$l_f_StuckY = Agent_GetAgentInfo(-2, "Y")
+				$l_b_Creep = False
+			EndIf
+		EndIf
+
+		Local $l_f_Dist = Agent_GetDistanceToXY($a_f_X, $a_f_Y)
+		If $l_f_Dist + 80 < $l_f_Best Then
+			$l_f_Best = $l_f_Dist
+			$l_h_Best = TimerInit()
+			$l_b_Creep = False
+			$l_i_Forced = 0
+		ElseIf TimerDiff($l_h_Best) > 25000 Then
+			Return False
+		EndIf
+
+		$l_i_Index = Leveler_MeshIndex($l_a_Path, $l_i_Index)
+		Local $l_f_MyX = Agent_GetAgentInfo(-2, "X")
+		Local $l_f_MyY = Agent_GetAgentInfo(-2, "Y")
+		Local $l_f_GoX = $a_f_X
+		Local $l_f_GoY = $a_f_Y
+		If $l_i_Index < UBound($l_a_Path) Then
+			$l_f_GoX = $l_a_Path[$l_i_Index][0]
+			$l_f_GoY = $l_a_Path[$l_i_Index][1]
+			$l_i_Layer = $l_a_Path[$l_i_Index][2]
+		EndIf
+		; The last stretch of an exit stays on the plane we reached. Forcing layer 0 here walks back off the bridge.
+		If $l_f_Dist < 400 Then $l_i_Layer = Agent_GetAgentInfo(-2, "Plane")
+
+		If TimerDiff($l_h_Stuck) > 2000 Then
+			Local $l_f_Moved = Sqrt(($l_f_MyX - $l_f_StuckX) ^ 2 + ($l_f_MyY - $l_f_StuckY) ^ 2)
+			If $l_f_Moved < 120 Then
+				If Not $l_b_Creep Then
+					$l_b_Creep = True
+				ElseIf $l_i_Index < UBound($l_a_Path) Then
+					$l_i_Index += 1
+					$l_i_Forced += 1
+					$l_b_Creep = False
+				EndIf
+				If $l_i_Forced >= 3 And Not $l_b_Rebuilt Then
+					$l_b_Rebuilt = True
+					$l_i_Forced = 0
+					$l_a_Path = Leveler_BuildMeshPath($a_f_X, $a_f_Y, 0)
+					$l_i_Index = 0
+					If UBound($l_a_Path) = 0 Then Return False
+					Out("[Move] Rebuilt mesh route to " & Round($a_f_X) & ", " & Round($a_f_Y) & " (" & UBound($l_a_Path) & " waypoints)")
+				EndIf
+			Else
+				$l_b_Creep = False
+			EndIf
+			$l_f_StuckX = $l_f_MyX
+			$l_f_StuckY = $l_f_MyY
+			$l_h_Stuck = TimerInit()
+		EndIf
+
+		If $l_b_Creep Then
+			Local $l_f_Dx = $l_f_GoX - $l_f_MyX
+			Local $l_f_Dy = $l_f_GoY - $l_f_MyY
+			Local $l_f_Len = Sqrt($l_f_Dx ^ 2 + $l_f_Dy ^ 2)
+			If $l_f_Len > 350 Then
+				$l_f_GoX = $l_f_MyX + $l_f_Dx / $l_f_Len * 350
+				$l_f_GoY = $l_f_MyY + $l_f_Dy / $l_f_Len * 350
+			EndIf
+		EndIf
+		Map_MoveLayer($l_f_GoX, $l_f_GoY, $l_i_Layer)
+		Sleep(50)
+	WEnd
+	If Map_GetMapID() <> $l_i_StartMap Then Return True
+	Return Agent_GetDistanceToXY($a_f_X, $a_f_Y) < $LEVELER_ARRIVE_RANGE
+EndFunc
+
+; Drop waypoints we have already passed so a bridge ramp behind us is not the next click.
+Func Leveler_MeshIndex($a_a_Path, $a_i_Index)
+	Local $l_i_N = UBound($a_a_Path)
+	Local $l_f_X = Agent_GetAgentInfo(-2, "X")
+	Local $l_f_Y = Agent_GetAgentInfo(-2, "Y")
+	While $a_i_Index < $l_i_N
+		Local $l_f_D = Sqrt(($l_f_X - $a_a_Path[$a_i_Index][0]) ^ 2 + ($l_f_Y - $a_a_Path[$a_i_Index][1]) ^ 2)
+		If $l_f_D < 250 Then
+			$a_i_Index += 1
+			ContinueLoop
+		EndIf
+		If $a_i_Index + 1 < $l_i_N Then
+			Local $l_f_D2 = Sqrt(($l_f_X - $a_a_Path[$a_i_Index + 1][0]) ^ 2 + ($l_f_Y - $a_a_Path[$a_i_Index + 1][1]) ^ 2)
+			If $l_f_D2 + 120 < $l_f_D Then
+				$a_i_Index += 1
+				ContinueLoop
+			EndIf
+		EndIf
+		ExitLoop
+	WEnd
+	Return $a_i_Index
+EndFunc
+
+; Mesh path with bridge ramps kept. The plugin default of 1250 deletes the layer change.
+Func Leveler_BuildMeshPath($a_f_X, $a_f_Y, $a_v_Obstacles)
+	Local $l_v_Obs = 0
+	If IsString($a_v_Obstacles) And $a_v_Obstacles <> "" And $a_v_Obstacles <> "0" Then
+		$l_v_Obs = Call($a_v_Obstacles)
+	ElseIf IsArray($a_v_Obstacles) Then
+		$l_v_Obs = $a_v_Obstacles
+	EndIf
+	Local $l_i_Simplify = $g_iPathfinder_SimplifyRange
+	$g_iPathfinder_SimplifyRange = 450
+	Local $l_a_Path = _Pathfinder_GetPath(Agent_GetAgentInfo(-2, "X"), Agent_GetAgentInfo(-2, "Y"), Agent_GetAgentInfo(-2, "Plane"), $a_f_X, $a_f_Y, -1, $l_v_Obs)
+	$g_iPathfinder_SimplifyRange = $l_i_Simplify
+	If IsArray($l_a_Path) And UBound($l_a_Path) > 0 Then Return $l_a_Path
+	Local $l_a_Empty[0][4]
+	Return $l_a_Empty
+EndFunc
+
 ; Pathfinder path to a point. $a_b_Avoid adds nearby obstacles so the run steps around them.
 Func Leveler_BuildRunPath($a_f_X, $a_f_Y, $a_b_Avoid)
 	Local $l_v_Obs = 0
@@ -208,18 +351,63 @@ Func Leveler_SetHeroesBehavior($a_i_Behavior)
 	Next
 EndFunc
 
-; Layer-aware direct move. Prefer Pathfinder_MoveTo; this is the fallback when mesh path fails.
-; Walk straight to X/Y with Map_Move. In KilroyMode, STAND UP! on KO instead of aborting.
+; Straight move on the current layer. A long click stops at a bridge ramp, so a stall
+; becomes short steps. One attempt uses the other plane; flipping every tick is the back-and-forth.
 Func Leveler_MoveDirect($a_f_X, $a_f_Y, $a_i_Timeout = 30000, $a_b_Combat = False)
 	Local $l_i_StartMap = Map_GetMapID()
 	Local $l_h_Timer = TimerInit()
+	Local $l_h_Stuck = TimerInit()
+	Local $l_f_StuckX = Agent_GetAgentInfo(-2, "X")
+	Local $l_f_StuckY = Agent_GetAgentInfo(-2, "Y")
+	Local $l_f_Best = Agent_GetDistanceToXY($a_f_X, $a_f_Y)
+	Local $l_h_Best = TimerInit()
+	Local $l_b_Creep = False
+	Local $l_b_TriedOtherPlane = False
 	While TimerDiff($l_h_Timer) < $a_i_Timeout
+		If $g_b_LevelerPaused Then Return False
 		If Leveler_IsWiped() Then Return False
 		If Map_GetMapID() <> $l_i_StartMap Then Return True
 		If Agent_GetDistanceToXY($a_f_X, $a_f_Y) < $LEVELER_ARRIVE_RANGE Then Return True
 		If $a_b_Combat Then Leveler_CombatTick()
-		; Map_Move has no plane — sticks on bridges. Keep the current layer.
-		Map_MoveLayer($a_f_X, $a_f_Y, Agent_GetAgentInfo(-2, "Plane"))
+
+		Local $l_f_MyX = Agent_GetAgentInfo(-2, "X")
+		Local $l_f_MyY = Agent_GetAgentInfo(-2, "Y")
+		Local $l_i_Plane = Agent_GetAgentInfo(-2, "Plane")
+		Local $l_f_Dist = Agent_GetDistanceToXY($a_f_X, $a_f_Y)
+		If $l_f_Dist + 80 < $l_f_Best Then
+			$l_f_Best = $l_f_Dist
+			$l_h_Best = TimerInit()
+			$l_b_Creep = False
+			$l_b_TriedOtherPlane = False
+		EndIf
+		If TimerDiff($l_h_Stuck) > 2000 Then
+			If Sqrt(($l_f_MyX - $l_f_StuckX) ^ 2 + ($l_f_MyY - $l_f_StuckY) ^ 2) < 120 Then $l_b_Creep = True
+			$l_f_StuckX = $l_f_MyX
+			$l_f_StuckY = $l_f_MyY
+			$l_h_Stuck = TimerInit()
+		EndIf
+
+		Local $l_f_GoX = $a_f_X
+		Local $l_f_GoY = $a_f_Y
+		Local $l_i_GoPlane = $l_i_Plane
+		If $l_b_Creep Then
+			Local $l_f_Dx = $a_f_X - $l_f_MyX
+			Local $l_f_Dy = $a_f_Y - $l_f_MyY
+			Local $l_f_Len = Sqrt($l_f_Dx ^ 2 + $l_f_Dy ^ 2)
+			If $l_f_Len > 350 Then
+				$l_f_GoX = $l_f_MyX + $l_f_Dx / $l_f_Len * 350
+				$l_f_GoY = $l_f_MyY + $l_f_Dy / $l_f_Len * 350
+			EndIf
+			If Not $l_b_TriedOtherPlane And TimerDiff($l_h_Best) > 4000 Then
+				$l_b_TriedOtherPlane = True
+				If $l_i_Plane = 0 Then
+					$l_i_GoPlane = 1
+				Else
+					$l_i_GoPlane = 0
+				EndIf
+			EndIf
+		EndIf
+		Map_MoveLayer($l_f_GoX, $l_f_GoY, $l_i_GoPlane)
 		Sleep(250)
 	WEnd
 	Return Agent_GetDistanceToXY($a_f_X, $a_f_Y) < $LEVELER_ARRIVE_RANGE
@@ -397,11 +585,27 @@ Func Leveler_MoveAndExit($a_f_X, $a_f_Y, $a_i_MapID, $a_b_Combat = False)
 	EndIf
 	If Map_GetMapID() = $a_i_MapID Then Return Leveler_WaitUntilMapReady()
 
-	; Nudge into the portal several times — a single Map_Move often stops short.
+	; Step past the portal on the plane we are already on. Stopping on the coordinate
+	; is what turns the character around at a bridge exit.
 	Local $i
-	For $i = 1 To 10
+	Local $l_f_DirX = 0
+	Local $l_f_DirY = 0
+	For $i = 1 To 12
 		If Map_GetMapID() <> $l_i_StartMap Then ExitLoop
-		Map_MoveLayer($a_f_X, $a_f_Y, Agent_GetAgentInfo(-2, "Plane"))
+		Local $l_f_MyX = Agent_GetAgentInfo(-2, "X")
+		Local $l_f_MyY = Agent_GetAgentInfo(-2, "Y")
+		Local $l_f_Dx = $a_f_X - $l_f_MyX
+		Local $l_f_Dy = $a_f_Y - $l_f_MyY
+		Local $l_f_Len = Sqrt($l_f_Dx ^ 2 + $l_f_Dy ^ 2)
+		If $l_f_Len > 80 Then
+			$l_f_DirX = $l_f_Dx / $l_f_Len
+			$l_f_DirY = $l_f_Dy / $l_f_Len
+		EndIf
+		If $l_f_DirX = 0 And $l_f_DirY = 0 Then
+			Map_MoveLayer($a_f_X, $a_f_Y, Agent_GetAgentInfo(-2, "Plane"))
+		Else
+			Map_MoveLayer($a_f_X + $l_f_DirX * 300, $a_f_Y + $l_f_DirY * 300, Agent_GetAgentInfo(-2, "Plane"))
+		EndIf
 		Sleep(400)
 	Next
 	If Map_GetMapID() = $a_i_MapID Then Return Leveler_WaitUntilMapReady()
@@ -565,7 +769,7 @@ Func Leveler_StepAllowsMap($a_i_Step, $a_i_Map)
 			If Map_IsMapUnlocked($MAP_CHO_OUTPOST) Then Return $a_i_Map = $MAP_CHO_OUTPOST
 			Return $a_i_Map = $MAP_SHING_JEA Or $a_i_Map = $MAP_SUNQUA_VALE
 		Case $LEVELER_STEP_CHO_MISSION
-			Return $a_i_Map = $MAP_CHO_OUTPOST Or $a_i_Map = $MAP_RAN_MUSU
+			Return $a_i_Map = $MAP_CHO_OUTPOST Or $a_i_Map = $MAP_CHO_MISSION Or $a_i_Map = $MAP_RAN_MUSU
 		Case $LEVELER_STEP_ATTR_1
 			Return $a_i_Map = $MAP_CHO_EXPLORABLE Or $a_i_Map = $MAP_KINYA
 		Case $LEVELER_STEP_TENGU
@@ -580,7 +784,7 @@ Func Leveler_StepAllowsMap($a_i_Step, $a_i_Map)
 			If Map_IsMapUnlocked($MAP_ZEN_OP) Then Return $a_i_Map = $MAP_ZEN_OP
 			Return $a_i_Map = $MAP_JAYA Or $a_i_Map = $MAP_HAIJU
 		Case $LEVELER_STEP_ZEN_MISSION
-			Return $a_i_Map = $MAP_ZEN_EXP Or $a_i_Map = $MAP_ZEN_OP
+			Return $a_i_Map = $MAP_ZEN_EXP Or $a_i_Map = $MAP_ZEN_OP Or $a_i_Map = $MAP_ZEN_MISSION
 		Case $LEVELER_STEP_TO_MARKET
 			If Map_IsMapUnlocked($MAP_MARKETPLACE) Then Return $a_i_Map = $MAP_MARKETPLACE
 			Return $a_i_Map = $MAP_KAINENG_DOCKS
