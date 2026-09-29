@@ -9,9 +9,10 @@
 Global Const $LEVELER_BAR_STARTER = 0
 Global Const $LEVELER_BAR_INTERRUPT = 1
 Global Const $LEVELER_BAR_INSPIRE = 2
-; A/Me bar used from Zen Daijun until Kaineng. Apply the template; do not check slots.
+; Mesmer bar used from Zen Daijun until Kaineng. Primary must match the character.
+; Illusion 7, Domination 6: Signet of Disruption, Leech Signet, Conjure Phantasm,
+; Ether Feast, Empathy, Backfire, Shatter Hex. Apply the template; do not check slots.
 Global Const $LEVELER_BAR_ZEN = 3
-Global Const $LEVELER_TEMPLATE_ZEN = "OwVCEnYCX3DfAKoBcwQAAA"
 
 ; Return the profession skill-template code for starter, interrupt, or inspire.
 Func Leveler_ProfessionSkillBar($a_i_Kind, $a_i_Prof = 0)
@@ -80,7 +81,27 @@ Func Leveler_ProfessionSkillBar($a_i_Kind, $a_i_Prof = 0)
 			EndSwitch
 			Return "OQUCErwSOw1ZQPoBoQRIA"
 		Case $LEVELER_BAR_ZEN
-			Return $LEVELER_TEMPLATE_ZEN
+			; Same Mesmer skills. Only the primary profession byte changes.
+			; Mesmer primary keeps the current secondary (template secondary 0).
+			Switch $a_i_Prof
+				Case $GC_I_PROFESSION_WARRIOR
+					Return "OQUCEnYCX3DfAKoBcwQAAA"
+				Case $GC_I_PROFESSION_RANGER
+					Return "OgUCEnYCX3DfAKoBcwQAAA"
+				Case $GC_I_PROFESSION_MONK
+					Return "OwUCEnYCX3DfAKoBcwQAAA"
+				Case $GC_I_PROFESSION_NECROMANCER
+					Return "OAVCEnYCX3DfAKoBcwQAAA"
+				Case $GC_I_PROFESSION_MESMER
+					Return "OQBCEnYCX3DfAKoBcwQAAA"
+				Case $GC_I_PROFESSION_ELEMENTALIST
+					Return "OgVCEnYCX3DfAKoBcwQAAA"
+				Case $GC_I_PROFESSION_ASSASSIN
+					Return "OwVCEnYCX3DfAKoBcwQAAA"
+				Case $GC_I_PROFESSION_RITUALIST
+					Return "OAWCEnYCX3DfAKoBcwQAAA"
+			EndSwitch
+			Return ""
 	EndSwitch
 	Return ""
 EndFunc
@@ -139,21 +160,31 @@ Func Leveler_LoadProfessionSkillBar($a_i_Kind = -1)
 	Return $l_b_Ok
 EndFunc
 
-; Set the Zen Daijun A/Me bar slot-by-slot. Do not use Skill_LoadSkillBar.
+; Load the Zen Daijun Mesmer bar for this character's primary. Do not use Skill_LoadSkillBar.
 Func Leveler_LoadZenSkillBar()
 	$g_b_UAIReady = False
 	If Not Map_GetInstanceInfo("IsOutpost") Then Return True
 	Local $l_i_Map = Map_GetMapID()
+	Local $l_s_Bar = Leveler_ProfessionSkillBar($LEVELER_BAR_ZEN)
+	If $l_s_Bar = "" Then
+		Out("[Skills] No Zen skill template for profession " & Leveler_PrimaryProfession())
+		Return False
+	EndIf
 	; Skip reload if the template is already on this map.
 	If $g_i_ZenBarLoadedMap = $l_i_Map And Skill_GetSkillbarInfo(1, "SkillID") <> 0 Then
 		Out("[Skills] Zen skill template already loaded on map " & $l_i_Map)
 		Return True
 	EndIf
-	Out("[Skills] Loading skill template " & $LEVELER_TEMPLATE_ZEN)
-	Attribute_LoadSkillTemplate($LEVELER_TEMPLATE_ZEN)
-	$g_i_ZenBarLoadedMap = $l_i_Map
+	Out("[Skills] Loading skill template " & $l_s_Bar)
+	Local $l_b_Ok = Attribute_LoadSkillTemplate($l_s_Bar)
 	Sleep(800)
-	Return True
+	If $l_b_Ok Then
+		$g_i_ZenBarLoadedMap = $l_i_Map
+		Out("[Skills] Zen skill template loaded for profession " & Leveler_PrimaryProfession())
+	Else
+		Out("[Skills] Zen skill template failed for profession " & Leveler_PrimaryProfession())
+	EndIf
+	Return $l_b_Ok
 EndFunc
 
 #EndRegion Load

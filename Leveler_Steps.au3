@@ -2657,10 +2657,8 @@ Func Leveler_Step_AnUnwelcomeGuest()
 		If Not Leveler_HasQuest($QUEST_UNWELCOME) Then
 			If Not Leveler_QuestLoop($QUEST_UNWELCOME, 0, 0, $DIALOG_UNWELCOME_ACCEPT, "accept", $MODEL_ZUNRAA) Then Return False
 		EndIf
-		Party_LeaveGroup(True)
-		Sleep(300)
-		Local $l_ai_Hench[1] = [5]
-		Leveler_PrepareHeroTeam($l_ai_Hench)
+		; Heroes are not unlocked yet. Seitung fills the party with henchmen only.
+		Leveler_PrepareForBattle()
 		If Not Leveler_MoveAndDialog(20350.00, 9087.00, $DIALOG_ZEN_SKIP, False) Then Return False
 		If Not Leveler_WaitForMap($MAP_ZEN_EXP, 30000) Then Return False
 	EndIf
