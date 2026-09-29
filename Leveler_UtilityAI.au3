@@ -5,11 +5,6 @@
 
 Global $g_b_LevelerPathCombat = False
 
-; The restored fight core still calls these names. The rest of UtilityAI renamed them.
-Func UAI_UpdateCache($a_f_AggroRange = 1320)
-	Return UAI_UpdateAgentCache($a_f_AggroRange)
-EndFunc
-
 ; Name the restored fight core still calls. Forwards to the renamed weapon-set function.
 Func UAI_DeterminateWeaponSets()
 	Return UAI_DetermineWeaponSets()
