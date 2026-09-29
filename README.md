@@ -16,7 +16,8 @@ The main script is `Factions_Character_Leveler.au3`. It includes `../../API/_GwA
 
 1. Launch Guild Wars and log the Factions character in.
 2. Run `Factions_Character_Leveler.au3` with AutoIt3 x86.
-3. Pick the character, click Start. Refresh re-detects the next incomplete step.
+   On Windows the script asks for administrator rights so it can read the client. On Linux under Wine it stays in the current process; launch it inside the same Wine prefix as Guild Wars.
+3. Pick the character, click Start. The script binds the Guild Wars or Guild Wars Reforged window so key presses reach the client. Refresh re-detects the next incomplete step.
 
 **Unlock All Secondary Professions** is off by default. Leave it off when gold is short. Tick it to pay the Great Temple trainers, including Paragon and Dervish.
 
