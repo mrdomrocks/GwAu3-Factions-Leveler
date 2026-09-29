@@ -1725,10 +1725,10 @@ Func Leveler_HasKeiranBow()
 	Return False
 EndFunc
 
-; Character level from the player agent, with a party-info fallback.
+; Character level from the player agent, then the world context.
 Func Leveler_PlayerLevel()
 	Local $l_i_Level = Agent_GetAgentInfo(-2, "Level")
-	If $l_i_Level = 0 Then $l_i_Level = Party_GetPartyProfessionInfo(-2, "Level")
+	If $l_i_Level = 0 Then $l_i_Level = World_GetWorldInfo("Level")
 	Return $l_i_Level
 EndFunc
 #EndRegion Scrying Pool

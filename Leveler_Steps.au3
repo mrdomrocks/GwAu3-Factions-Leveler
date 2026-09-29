@@ -1338,7 +1338,7 @@ EndFunc
 
 ; Guard Tsukaro at the Linnok gate. The Road Less Traveled (0x815604),
 ; "We have been trained well..." (0x800008), "Let's Go!" (0x800009), then "Yes." (0x80000B).
-; QuestLoop skips this when #342 is already CanReward. Send the IDs after arriving and stopping.
+; QuestLoop skips this when #342 is already IsCompleted. Send the IDs after arriving and stopping.
 Func Leveler_TalkToGuardTsukaro()
 	If Map_GetMapID() = $MAP_SAOSHANG Then Return True
 	Leveler_SetPacifist()

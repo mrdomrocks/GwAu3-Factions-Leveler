@@ -41,7 +41,7 @@ Func Leveler_QuestLoop($a_i_QuestID, $a_f_X, $a_f_Y, $a_i_Dialog, $a_s_Mode = "a
 		; before we have walked to the quest NPC.
 		If $a_s_Mode <> "step" And Leveler_QuestActionSucceeded($a_i_QuestID, $a_s_Mode, $a_i_NpcModel, $l_i_StartMap, $l_b_HadQuest) Then ExitLoop
 		If $a_s_Mode = "step" And $l_i_Attempt > 1 And Leveler_QuestActionSucceeded($a_i_QuestID, $a_s_Mode, $a_i_NpcModel, $l_i_StartMap, $l_b_HadQuest) Then ExitLoop
-		If $a_s_Mode = "step" And $a_i_QuestID <> 0 And Quest_GetQuestInfo($a_i_QuestID, "CanReward") Then ExitLoop
+		If $a_s_Mode = "step" And $a_i_QuestID <> 0 And Quest_GetQuestInfo($a_i_QuestID, "IsCompleted") Then ExitLoop
 
 		Leveler_ResolveQuestXY($a_i_NpcModel, $l_f_X, $l_f_Y)
 		If $l_f_X = 0 And $l_f_Y = 0 And $a_i_QuestID <> 0 Then Leveler_FillQuestMarker($a_i_QuestID, $l_f_X, $l_f_Y)
@@ -202,7 +202,7 @@ Func Leveler_QuestActionSucceeded($a_i_QuestID, $a_s_Mode, $a_i_NpcModel, $a_i_S
 			Return $a_b_HadQuest
 		Case "step", "skip"
 			If Map_GetMapID() <> $a_i_StartMap Then Return True
-			If $a_s_Mode = "step" And $a_i_QuestID <> 0 And Quest_GetQuestInfo($a_i_QuestID, "CanReward") Then Return True
+			If $a_s_Mode = "step" And $a_i_QuestID <> 0 And Quest_GetQuestInfo($a_i_QuestID, "IsCompleted") Then Return True
 			Return Not Leveler_NpcHasQuestMarker($a_i_NpcModel)
 		Case Else
 			Return Leveler_HasQuest($a_i_QuestID)
@@ -210,11 +210,11 @@ Func Leveler_QuestActionSucceeded($a_i_QuestID, $a_s_Mode, $a_i_NpcModel, $a_i_S
 EndFunc
 
 ; 0 = not in log, 1 = in log (objectives open), 2 = in log (reward ready).
-; Bit 0x2 / CanReward means the reward can be taken. It is not finished for #317 or #318.
+; Bit 0x2 is Quest_GetQuestInfo "IsCompleted": the reward can be taken. It is not finished for #317 or #318.
 Func Leveler_QuestLogMatch($a_i_QuestID)
 	If $a_i_QuestID = 0 Then Return 0
 	If Quest_GetQuestInfo($a_i_QuestID, "HasQuest") Then
-		If Quest_GetQuestInfo($a_i_QuestID, "CanReward") Then Return 2
+		If Quest_GetQuestInfo($a_i_QuestID, "IsCompleted") Then Return 2
 		If BitAND(Quest_GetQuestInfo($a_i_QuestID, "LogState"), 0x2) <> 0 Then Return 2
 		Return 1
 	EndIf
@@ -238,9 +238,9 @@ Func Leveler_QuestInLog($a_i_QuestID)
 	Return Leveler_QuestLogMatch($a_i_QuestID) <> 0
 EndFunc
 
-; True when the quest is in the log and CanReward / LogState bit 2 is set.
+; True when the quest is in the log and IsCompleted / LogState bit 2 is set.
 Func Leveler_QuestReadyForReward($a_i_QuestID)
-	If Quest_GetQuestInfo($a_i_QuestID, "CanReward") Then Return True
+	If Quest_GetQuestInfo($a_i_QuestID, "IsCompleted") Then Return True
 	Return Leveler_QuestLogMatch($a_i_QuestID) = 2
 EndFunc
 

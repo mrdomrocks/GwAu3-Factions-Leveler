@@ -655,7 +655,7 @@ Func Leveler_StatusCheck()
 	; Monastery tutorial is character-specific. Account map unlocks, storage
 	; pointers, and account skill unlocks must not skip Secondary / Xunlai / craft.
 	$g_ab_StepDone[$LEVELER_STEP_OVERLOOK] = $l_b_ShingJea And Not Leveler_OnOverlook()
-	; Do not treat reward-ready (#440 still in the log) as done. QuestLogCompleted is CanReward,
+	; Do not treat reward-ready (#440 still in the log) as done. QuestLogCompleted is IsCompleted,
 	; which skipped Forming A Party and jumped to Secondary on a fresh character mid-hand-in.
 	$g_ab_StepDone[$LEVELER_STEP_PARTY] = (Not Leveler_QuestNeedsHandIn($QUEST_FORMING_A_PARTY)) And (Leveler_IsQuestDone($QUEST_FORMING_A_PARTY) Or Leveler_QuestFinished($QUEST_FORMING_A_PARTY) Or Leveler_HasSecondaryProfession() Or Leveler_HasQuest($QUEST_SECONDARY) Or Leveler_HasQuest($QUEST_FORMAL_INTRO))
 	$g_ab_StepDone[$LEVELER_STEP_SECONDARY] = Leveler_SecondaryStepReadyToLeave()
