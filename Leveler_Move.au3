@@ -619,12 +619,12 @@ EndFunc
 ; Pathfinder to a portal, then walk through it.
 Func Leveler_PathToExit($a_f_X, $a_f_Y, $a_i_MapID, $a_b_Combat = False)
 	Out("[Path] Pathfinder to portal " & Round($a_f_X) & ", " & Round($a_f_Y) & " → map " & $a_i_MapID)
-	If Map_GetMapID() = $a_i_MapID Then Return True
+	If Map_GetMapID() = $a_i_MapID Then Return Leveler_CacheIfFightMap()
 	If Not Leveler_MoveTo($a_f_X, $a_f_Y, $a_b_Combat) Then
-		If Map_GetMapID() = $a_i_MapID Then Return True
+		If Map_GetMapID() = $a_i_MapID Then Return Leveler_CacheIfFightMap()
 		Out("[Path] Pathfinder did not reach the portal. Walking the last stretch.")
 	EndIf
-	If Map_GetMapID() = $a_i_MapID Then Return True
+	If Map_GetMapID() = $a_i_MapID Then Return Leveler_CacheIfFightMap()
 	If Not Leveler_MoveAndExit($a_f_X, $a_f_Y, $a_i_MapID, $a_b_Combat) Then
 		Out("[Path] Did not load map " & $a_i_MapID & " (now " & Map_GetMapID() & ")")
 		Return False
@@ -653,8 +653,7 @@ Func Leveler_LeaveChoExplorableToRanMusu()
 	Out("[Recover] Pathing Lost Treasure exit to Ran Musu Gardens")
 	If Not Leveler_EquipTrainerSkills(False) Then Return False
 	Sleep(1500)
-	$g_b_UAIReady = False
-	If Not Leveler_PrepareCombatAI() Then Return False
+	If Not Leveler_CacheUtilityAIForMap($MAP_CHO_EXPLORABLE) Then Return False
 	If Not Leveler_MoveTo(-17979.38, -493.08, True) Then
 		If Map_GetMapID() <> $MAP_CHO_EXPLORABLE Then Return Map_GetMapID() = $MAP_RAN_MUSU
 		Out("[Recover] Could not reach the Cho explorable portal")
@@ -1802,8 +1801,12 @@ EndFunc
 
 ; Wait until Map_GetMapID equals the target.
 Func Leveler_WaitForMap($a_i_MapID, $a_i_Timeout = 45000)
-	If Map_GetMapID() = $a_i_MapID Then Return True
-	Return Map_WaitMapLoading($a_i_MapID, -1, $a_i_Timeout)
+	If Map_GetMapID() <> $a_i_MapID Then
+		If Not Map_WaitMapLoading($a_i_MapID, -1, $a_i_Timeout) Then Return False
+	EndIf
+	If Map_GetMapID() <> $a_i_MapID Then Return False
+	; Map id can match while the instance is still loading. Cache only after it can fight.
+	Return Leveler_WaitUntilMapReady()
 EndFunc
 
 ; After a disconnect the client can sit on a loading / zero map. Wait until we can act.
@@ -1833,7 +1836,7 @@ Func Leveler_ResumeFromCurrentPosition()
 	Local $l_f_Y = Agent_GetAgentInfo(-2, "Y")
 	Out("[Recover] Connection resumed. Map " & $l_i_Map & "  Pos " & Round($l_f_X) & ", " & Round($l_f_Y) & ". Continuing from here.")
 	Sleep(2000)
-	If Map_GetInstanceInfo("IsExplorable") Then Leveler_PrepareCombatAI()
+	If Not Leveler_CacheIfFightMap() Then Return False
 	$g_b_ConnectionLost = False
 	Return True
 EndFunc
@@ -1848,13 +1851,13 @@ Func Leveler_WaitUntilMapReady($a_i_Timeout = 45000)
 		If Leveler_ClientDisconnected() Then $g_b_ConnectionLost = True
 		If Leveler_ClientIsReady() Then
 			If $g_b_ConnectionLost Then Return Leveler_ResumeFromCurrentPosition()
-			Return True
+			Return Leveler_CacheIfFightMap()
 		EndIf
 		Sleep(250)
 	WEnd
 	If Leveler_ClientIsReady() Then
 		If $g_b_ConnectionLost Then Return Leveler_ResumeFromCurrentPosition()
-		Return True
+		Return Leveler_CacheIfFightMap()
 	EndIf
 	Return False
 EndFunc

@@ -119,6 +119,8 @@ EndFunc
 
 ; One pass of the bar. Skills fire before auto-attack.
 Func Leveler_UAI_UseSkills($a_f_x, $a_f_y, $a_f_AggroRange = 1320, $a_f_MaxDistanceToXY = 3500)
+	; Empty static slots used to skip the refresh, so a missed entry cache never recovered.
+	If Not Leveler_UAI_RefreshSkillCache() Then Return False
 	For $skillSlot = 1 To 8
 		If UAI_GetStaticSkillInfo($skillSlot, $GC_UAI_STATIC_SKILL_SkillID) = 0 Then ContinueLoop
 		If $g_b_SkillChanged = True And Cache_EndFormChangeBuild($skillSlot) Then $g_b_SkillChanged = False

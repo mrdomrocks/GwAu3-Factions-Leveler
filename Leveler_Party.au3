@@ -288,6 +288,22 @@ Func Leveler_PrepareCombatAI()
 	Return True
 EndFunc
 
+; Cache when this instance can fight. Outposts skip. Punch-out caches after the brawling bar arrives.
+; A town or mission lobby clears the flag even when it keeps the explorable's map id,
+; so the next visit to that id is cached again.
+Func Leveler_CacheIfFightMap()
+	If Leveler_IsPunchoutMap() Then Return True
+	Local $l_i_Map = Map_GetMapID()
+	If $l_i_Map <> $g_i_LastUAIMap Then $g_b_UAIReady = False
+	If Not Leveler_ShouldFightHere() Then
+		$g_b_UAIReady = False
+		Return True
+	EndIf
+	If $g_b_UAIReady And $g_i_LastUAIMap = $l_i_Map Then Return True
+	Out("[Combat] Caching UtilityAI for explorable map " & $l_i_Map)
+	Return Leveler_CacheUtilityAIForMap($l_i_Map)
+EndFunc
+
 ; After a map load the old instance cache is invalid. Wait until this map can fight, then recache.
 Func Leveler_CacheUtilityAIForMap($a_i_MapID)
 	$g_b_CombatMode = True
