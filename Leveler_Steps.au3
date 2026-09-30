@@ -2667,7 +2667,12 @@ Func Leveler_Step_AnUnwelcomeGuest()
 		If Not Leveler_WaitForMap($MAP_ZEN_EXP, 30000) Then Return False
 	EndIf
 
-	Leveler_EquipSkillBar()
+	; PrepareForBattle caches in Seitung Harbor. Cache_SkillBar refuses an outpost, so that
+	; call returns without binding CanUse. The new Zen Daijun instance has to be cached
+	; after it is explorable, or the fight walks in with an empty skill cache.
+	If Not Leveler_WaitUntilMapReady() Then Return False
+	Out("[Step] Zen Daijun explorable. Caching UtilityAI for An Unwelcome Guest.")
+	If Not Leveler_CacheUtilityAIForMap($MAP_ZEN_EXP) Then Return False
 	$g_b_CombatMode = True
 	Local $l_af_Out[11][2] = [ _
 			[-13959.50, 6375.26], _
