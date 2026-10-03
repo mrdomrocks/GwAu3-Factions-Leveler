@@ -426,6 +426,7 @@ EndFunc
 ; character on the account has paid; they must not skip this step on a fresh char.
 Func Leveler_XunlaiUnlocked()
 	If $g_b_XunlaiUnlocked Then Return True
+	If Leveler_LoadXunlaiUnlocked() Then Return True
 	; Past monastery crafts / later quests means this character already paid.
 	If Leveler_HasCraftedWeapon() Then Return True
 	If Leveler_HasMonasteryArmor() Then Return True
@@ -434,9 +435,35 @@ Func Leveler_XunlaiUnlocked()
 	Return False
 EndFunc
 
+Func Leveler_XunlaiProgressPath()
+	Return @ScriptDir & "\Leveler_Progress.ini"
+EndFunc
+
+; Ini section key for this character. Empty before the client is attached.
+Func Leveler_XunlaiCharKey()
+	Local $l_s_Name = Leveler_NormCharName(Player_GetCharName())
+	$l_s_Name = StringReplace($l_s_Name, "=", "")
+	$l_s_Name = StringReplace($l_s_Name, @CR, "")
+	$l_s_Name = StringReplace($l_s_Name, @LF, "")
+	Return $l_s_Name
+EndFunc
+
+; Remember a completed unlock across restarts. A new character has no entry.
+Func Leveler_LoadXunlaiUnlocked()
+	If $g_b_XunlaiUnlocked Then Return True
+	Local $l_s_Key = Leveler_XunlaiCharKey()
+	If $l_s_Key = "" Then Return False
+	If IniRead(Leveler_XunlaiProgressPath(), "Xunlai", $l_s_Key, "0") <> "1" Then Return False
+	$g_b_XunlaiUnlocked = True
+	Return True
+EndFunc
+
 ; Remember that this character has already paid for Xunlai storage.
 Func Leveler_MarkXunlaiUnlocked()
 	$g_b_XunlaiUnlocked = True
+	Local $l_s_Key = Leveler_XunlaiCharKey()
+	If $l_s_Key = "" Then Return
+	IniWrite(Leveler_XunlaiProgressPath(), "Xunlai", $l_s_Key, "1")
 EndFunc
 
 ; Zhao Di in Shing Jea. Energy Burn is optional if a skill point was already spent.

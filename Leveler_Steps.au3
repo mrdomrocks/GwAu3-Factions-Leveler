@@ -403,13 +403,39 @@ Func Leveler_Step_UnlockSecondary()
 	Return True
 EndFunc
 
-; Open the Xunlai chest so storage is available.
+; True when the material-storage bag pointer is populated for this chest window.
+Func Leveler_MaterialStorageOpen()
+	Return Item_GetBagPtr($GC_I_INVENTORY_MATERIAL_STORAGE) <> 0
+EndFunc
+
+; Poll until the 50g charge lands. Storage1Ptr is account-wide and is not proof.
+Func Leveler_XunlaiPaymentLanded($a_i_GoldBefore)
+	If $a_i_GoldBefore < 0 Then Return False
+	Local $l_h_Timer = TimerInit()
+	While TimerDiff($l_h_Timer) < 8000
+		If $g_b_LevelerPaused Then Return False
+		If Item_GetInventoryInfo("GoldCharacter") <= $a_i_GoldBefore - $XUNLAI_GOLD_COST + 5 Then Return True
+		Sleep(250)
+	WEnd
+	Return Item_GetInventoryInfo("GoldCharacter") <= $a_i_GoldBefore - $XUNLAI_GOLD_COST + 5
+EndFunc
+
+; Open the Xunlai chest so storage is available. The 50g purchase is sent once.
 Func Leveler_Step_UnlockXunlai()
 	$g_s_CurrentHeader = "Unlock Xunlai Storage"
 	Out("=== " & $g_s_CurrentHeader & " ===")
 	If Leveler_XunlaiUnlocked() Then
 		Out("[Step] Xunlai storage already unlocked on this character")
 		Return True
+	EndIf
+	If $g_b_XunlaiPurchaseSent Then
+		If Leveler_XunlaiPaymentLanded($g_i_XunlaiGoldBefore) Then
+			Leveler_MarkXunlaiUnlocked()
+			Out("[Step] Xunlai purchase already sent and the 50g was taken. Not paying again.")
+			Return True
+		EndIf
+		Out("[Step] Xunlai purchase was already sent once. Not opening the buy dialog again.")
+		Return False
 	EndIf
 	; Account storage pointers stay populated from other characters. Log them; do not skip.
 	If Leveler_HasStorageAccess() Then
@@ -435,22 +461,50 @@ Func Leveler_Step_UnlockXunlai()
 	If Not Leveler_MoveTo(-5465, 9727, False) Then Return False
 	If Not Leveler_MoveTo(-4791, 10140, False) Then Return False
 	If Not Leveler_MoveTo(-3945, 10328, False) Then Return False
-	If Not Leveler_MoveAndDialog($XUNLAI_X, $XUNLAI_Y, $DIALOG_GENERIC_TALK, False, $MODEL_XUNLAI) Then Return False
+	If Not Leveler_MoveTo($XUNLAI_X, $XUNLAI_Y, False) Then Return False
 	Local $l_i_Xunlai = Leveler_GetAgentByModel($MODEL_XUNLAI)
-	If $l_i_Xunlai <> 0 Then Agent_GoNPC($l_i_Xunlai)
-	Sleep(600)
+	If $l_i_Xunlai = 0 Then $l_i_Xunlai = Leveler_GetNearestNPCAt($XUNLAI_X, $XUNLAI_Y, 400)
+	If $l_i_Xunlai = 0 Then
+		Out("[Step] Xunlai agent not found")
+		Return False
+	EndIf
+	Local $l_b_MatBefore = Leveler_MaterialStorageOpen()
+	Agent_ChangeTarget($l_i_Xunlai)
+	Sleep(150)
+	Agent_GoNPC($l_i_Xunlai)
+	Local $l_h_Reach = TimerInit()
+	While TimerDiff($l_h_Reach) < 5000 And Agent_GetDistance($l_i_Xunlai) >= $LEVELER_ARRIVE_RANGE
+		If $g_b_LevelerPaused Then Return False
+		Sleep(100)
+	WEnd
+	If Agent_GetDistance($l_i_Xunlai) >= $LEVELER_ARRIVE_RANGE Then
+		Out("[Step] Could not reach the Xunlai agent")
+		Return False
+	EndIf
+	Sleep(800)
+	; Chest already bought: it opens without charging. Do not send the purchase dialogs.
+	If Not $l_b_MatBefore And Leveler_MaterialStorageOpen() Then
+		Leveler_MarkXunlaiUnlocked()
+		Out("[Step] Xunlai chest opened without a charge. Unlock already done.")
+		Return True
+	EndIf
+	Out("[Step] Sending the Xunlai purchase dialog once")
+	$g_i_XunlaiGoldBefore = Item_GetInventoryInfo("GoldCharacter")
+	$g_b_XunlaiPurchaseSent = True
 	Ui_Dialog($DIALOG_XUNLAI_1)
 	Sleep(800)
 	Ui_Dialog($DIALOG_XUNLAI_2)
-	Sleep(800)
-	; Proof this character paid: gold must drop by ~50. Do not trust Storage1Ptr.
-	Local $l_i_GoldAfter = Item_GetInventoryInfo("GoldCharacter")
-	If $l_i_GoldAfter > $l_i_Gold - $XUNLAI_GOLD_COST + 5 Then
-		Out("[Step] Xunlai unlock did not take " & $XUNLAI_GOLD_COST & " gold (now " & $l_i_GoldAfter & "). Not advancing.")
+	If Not Leveler_XunlaiPaymentLanded($g_i_XunlaiGoldBefore) Then
+		If Not $l_b_MatBefore And Leveler_MaterialStorageOpen() Then
+			Leveler_MarkXunlaiUnlocked()
+			Out("[Step] Xunlai chest is open. Not purchasing again.")
+			Return True
+		EndIf
+		Out("[Step] Xunlai unlock did not take " & $XUNLAI_GOLD_COST & " gold (now " & Item_GetInventoryInfo("GoldCharacter") & "). Not purchasing again.")
 		Return False
 	EndIf
 	Leveler_MarkXunlaiUnlocked()
-	Out("[Step] Xunlai storage unlocked (gold " & $l_i_Gold & " -> " & $l_i_GoldAfter & ")")
+	Out("[Step] Xunlai storage unlocked (gold " & $g_i_XunlaiGoldBefore & " -> " & Item_GetInventoryInfo("GoldCharacter") & ")")
 	Return True
 EndFunc
 
@@ -465,11 +519,18 @@ Func Leveler_Step_CraftWeapon()
 	If Not Leveler_Travel($MAP_SHING_JEA) Then Return False
 	Leveler_SetPacifist()
 	If Not Leveler_PrepareCraftWeaponFunds() Then Return False
-	If Not Leveler_MoveTo(-10896.94, 10807.54, False) Then Return False
-	If Not Leveler_MoveTo(-10942.73, 10783.19, False) Then Return False
-	If Not Leveler_InteractNpcAt(-10614.00, 10996.00, False) Then Return False
-	If Not Leveler_BuyWeaponMaterials() Then Return False
-	If Not Leveler_BuyEarlyArmorMaterials() Then Return False
+	Local $l_ai_ArmorM, $l_ai_ArmorC
+	Leveler_GetArmorBuyList($l_ai_ArmorM, $l_ai_ArmorC)
+	Local $l_b_StaffMats = Leveler_CountModel($GC_I_MODELID_WOOD, False) >= 4 And Leveler_CountModel($GC_I_MODELID_DUST, False) >= 1
+	If $l_b_StaffMats And Leveler_MaterialsInBags($l_ai_ArmorM, $l_ai_ArmorC) Then
+		Out("[Craft] Staff and monastery mats are already in bags. Not buying from the trader.")
+	Else
+		If Not Leveler_MoveTo(-10896.94, 10807.54, False) Then Return False
+		If Not Leveler_MoveTo(-10942.73, 10783.19, False) Then Return False
+		If Not Leveler_InteractNpcAt(-10614.00, 10996.00, False) Then Return False
+		If Not Leveler_BuyWeaponMaterials() Then Return False
+		If Not Leveler_BuyEarlyArmorMaterials() Then Return False
+	EndIf
 	If Not Leveler_MoveTo(-10896.94, 10807.54, False) Then Return False
 	If Not Leveler_InteractNpcAt(-6519.00, 12335.00, False) Then Return False
 	Sleep(1000)
@@ -487,6 +548,14 @@ Func Leveler_Step_CraftMonasteryArmor()
 	EndIf
 	If Not Leveler_Travel($MAP_SHING_JEA) Then Return False
 	Leveler_SetPacifist()
+	Local $l_ai_MatModels, $l_ai_MatCounts
+	Leveler_GetArmorBuyList($l_ai_MatModels, $l_ai_MatCounts)
+	Leveler_WithdrawCraftMaterials($l_ai_MatModels, $l_ai_MatCounts)
+	If Not Leveler_MaterialsInBags($l_ai_MatModels, $l_ai_MatCounts) Then
+		If Not Leveler_MoveTo(-10896.94, 10807.54, False) Then Return False
+		If Not Leveler_InteractNpcAt(-10614.00, 10996.00, False) Then Return False
+		If Not Leveler_BuyEarlyArmorMaterials() Then Return False
+	EndIf
 	If Not Leveler_InteractNpcAt(-7115.00, 12636.00, False) Then Return False
 	If Not Leveler_CraftMonasteryArmor() Then Return False
 	Return True
@@ -1492,6 +1561,10 @@ Func Leveler_Step_CraftSeitungArmor()
 		Return Leveler_EquipArmorPieces($l_ai_Pieces)
 	EndIf
 
+	; Storage first. The trader is only for what the chest did not cover.
+	Local $l_ai_MatModels, $l_ai_MatCounts
+	Leveler_GetSeitungMatNeeds($l_ai_MatModels, $l_ai_MatCounts)
+	Leveler_WithdrawCraftMaterials($l_ai_MatModels, $l_ai_MatCounts)
 	; Buy Seitung mats at the Shing Jea common-material trader, then craft in Seitung.
 	If Not Leveler_SeitungMaterialsReady() Then
 		If Not Leveler_Travel($MAP_SHING_JEA) Then Return False
@@ -1825,20 +1898,31 @@ Func Leveler_Step_CraftMaxArmor()
 	If Not Leveler_Travel($MAP_KAINENG) Then Return False
 	Leveler_SetPacifist()
 	If Not Leveler_InterruptSkillsUnlocked() Then Leveler_BuyKainengInterrupts()
-	If Not Leveler_MoveTo(1592.00, -796.00, False) Then Return False
+	Local $l_ai_MatModels, $l_ai_MatCounts
+	Leveler_GetAllMaxArmorMatNeeds($l_ai_MatModels, $l_ai_MatCounts)
+	Leveler_WithdrawCraftMaterials($l_ai_MatModels, $l_ai_MatCounts)
 	Item_WithdrawGold(20000)
 	Sleep(400)
 	Out("[Craft] Gold after withdraw: " & Item_GetInventoryInfo("GoldCharacter"))
-	If Not Leveler_InteractNpcAt(1592.00, -796.00, False) Then Return False
-	If Not Leveler_BuyMaxArmorMaterials(True) Then Return False
-	Sleep(1500)
+	Local $l_ai_CommonM, $l_ai_CommonC
+	Leveler_GetMaxArmorMatNeeds(True, $l_ai_CommonM, $l_ai_CommonC)
+	If Not Leveler_MaterialsInBags($l_ai_CommonM, $l_ai_CommonC) Then
+		If Not Leveler_MoveTo(1592.00, -796.00, False) Then Return False
+		If Not Leveler_InteractNpcAt(1592.00, -796.00, False) Then Return False
+		If Not Leveler_BuyMaxArmorMaterials(True) Then Return False
+		Sleep(1500)
+	Else
+		Out("[Craft] Common max-armor mats are already in bags. Not buying them.")
+	EndIf
 
 	Local $l_ai_RareM, $l_ai_RareC
 	Leveler_GetMaxArmorMatNeeds(False, $l_ai_RareM, $l_ai_RareC)
-	If UBound($l_ai_RareM) > 0 Then
+	If UBound($l_ai_RareM) > 0 And Not Leveler_MaterialsInBags($l_ai_RareM, $l_ai_RareC) Then
 		If Not Leveler_InteractNpcAt(1495.00, -1315.00, False) Then Return False
 		If Not Leveler_BuyMaxArmorMaterials(False) Then Return False
 		Sleep(2000)
+	ElseIf UBound($l_ai_RareM) > 0 Then
+		Out("[Craft] Rare max-armor mats are already in bags. Not buying them.")
 	EndIf
 
 	Local $l_f_X, $l_f_Y

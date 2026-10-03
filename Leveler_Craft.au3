@@ -64,29 +64,39 @@ Func Leveler_FindEmptyInventorySlot(ByRef $a_i_Bag, ByRef $a_i_Slot)
 	Return False
 EndFunc
 
-; GoNPC the monastery chest so GoldStorage and material-storage bags populate.
+; GoNPC the local Xunlai agent so GoldStorage and material-storage bags populate.
+; Does not send the 50g purchase dialogs.
 Func Leveler_OpenXunlaiStorage()
 	If Not Leveler_XunlaiUnlocked() Then
 		Out("[Craft] Xunlai is not unlocked; cannot open storage")
 		Return False
 	EndIf
-	If Map_GetMapID() <> $MAP_SHING_JEA Then
+	If $g_i_XunlaiOpenedMap = Map_GetMapID() And Leveler_MaterialStorageOpen() Then Return True
+	If Not Map_GetInstanceInfo("IsOutpost") Then
+		Out("[Craft] Xunlai chest is in an outpost")
+		Return False
+	EndIf
+	Local $l_i_Xunlai = Leveler_GetAgentByModel($MODEL_XUNLAI)
+	If $l_i_Xunlai = 0 And Map_GetMapID() <> $MAP_SHING_JEA Then
 		If Not Leveler_Travel($MAP_SHING_JEA) Then Return False
+		$l_i_Xunlai = Leveler_GetAgentByModel($MODEL_XUNLAI)
 	EndIf
 	Out("[Craft] Opening Xunlai storage")
-	If Not Leveler_MoveAndDialog($XUNLAI_X, $XUNLAI_Y, $DIALOG_GENERIC_TALK, False, $MODEL_XUNLAI) Then Return False
-	Local $l_i_Xunlai = Leveler_GetAgentByModel($MODEL_XUNLAI)
 	If $l_i_Xunlai <> 0 Then
-		Agent_GoNPC($l_i_Xunlai)
-		Sleep(800)
+		Local $l_f_X = Agent_GetAgentInfo($l_i_Xunlai, "X")
+		Local $l_f_Y = Agent_GetAgentInfo($l_i_Xunlai, "Y")
+		If Not Leveler_MoveAndDialog($l_f_X, $l_f_Y, $DIALOG_GENERIC_TALK, False, $MODEL_XUNLAI) Then Return False
+	Else
+		If Not Leveler_MoveAndDialog($XUNLAI_X, $XUNLAI_Y, $DIALOG_GENERIC_TALK, False, $MODEL_XUNLAI) Then Return False
 	EndIf
 	Local $l_h_Timer = TimerInit()
 	While TimerDiff($l_h_Timer) < 5000
 		If $g_b_LevelerPaused Then Return False
+		If Leveler_MaterialStorageOpen() Then ExitLoop
 		If Leveler_HasStorageAccess() Then ExitLoop
-		If Item_GetBagPtr($GC_I_INVENTORY_MATERIAL_STORAGE) <> 0 Then ExitLoop
 		Sleep(200)
 	WEnd
+	If Leveler_MaterialStorageOpen() Or Leveler_HasStorageAccess() Then $g_i_XunlaiOpenedMap = Map_GetMapID()
 	Leveler_LogGold("after opening Xunlai")
 	Out("[Craft] Storage1 ptr " & Item_GetBagPtr($GC_I_INVENTORY_STORAGE1) & ", material storage ptr " & Item_GetBagPtr($GC_I_INVENTORY_MATERIAL_STORAGE))
 	Return True
@@ -176,6 +186,31 @@ Func Leveler_WithdrawStorageModel($a_i_Model, $a_i_Need)
 		Out("[Craft] Bags now have " & $l_i_Have & "/" & $a_i_Need & " of model " & $a_i_Model)
 	WEnd
 	Return $l_i_Have >= $a_i_Need
+EndFunc
+
+; Open the chest once, then move stored mats into bags before any trader buy.
+Func Leveler_WithdrawCraftMaterials(ByRef $a_ai_Models, ByRef $a_ai_Counts)
+	If Not IsArray($a_ai_Models) Then Return False
+	If UBound($a_ai_Models) = 0 Then Return True
+	Local $l_b_Short = False
+	Local $i
+	For $i = 0 To UBound($a_ai_Models) - 1
+		If Leveler_CountModel($a_ai_Models[$i], False) < $a_ai_Counts[$i] Then
+			$l_b_Short = True
+			ExitLoop
+		EndIf
+	Next
+	If Not $l_b_Short Then Return True
+	If Not Leveler_MaterialStorageOpen() Then
+		If Not Leveler_OpenXunlaiStorage() Then Return False
+	EndIf
+	For $i = 0 To UBound($a_ai_Models) - 1
+		Local $l_i_Stored = Leveler_CountStorageModel($a_ai_Models[$i])
+		Local $l_i_Bags = Leveler_CountModel($a_ai_Models[$i], False)
+		Out("[Craft] Model " & $a_ai_Models[$i] & " before buy: bags " & $l_i_Bags & ", storage " & $l_i_Stored & ", need " & $a_ai_Counts[$i])
+		Leveler_WithdrawStorageModel($a_ai_Models[$i], $a_ai_Counts[$i])
+	Next
+	Return True
 EndFunc
 
 ; Open Xunlai, pull staff/armor mats into bags, then fund character gold for remaining trader buys.
@@ -570,6 +605,16 @@ Func Leveler_GetMonasteryPieces()
 	Return $l_ai_Pieces
 EndFunc
 
+; True when every listed material is already in the bags.
+Func Leveler_MaterialsInBags(ByRef $a_ai_Models, ByRef $a_ai_Counts)
+	If Not IsArray($a_ai_Models) Then Return True
+	Local $i
+	For $i = 0 To UBound($a_ai_Models) - 1
+		If Leveler_CountModel($a_ai_Models[$i], False) < $a_ai_Counts[$i] Then Return False
+	Next
+	Return True
+EndFunc
+
 ; Buy monastery-armor mats into bags so Merchant_CraftItem can see them.
 Func Leveler_BuyEarlyArmorMaterials()
 	Local $l_ai_Models, $l_ai_Counts
@@ -887,54 +932,49 @@ Func Leveler_GetSeitungPieces()
 	Return $l_ai_Pieces
 EndFunc
 
-; Buy Seitung armor mats from the material trader.
-Func Leveler_BuySeitungMaterials()
+; Cloth, hide, and dust totals for the Seitung set.
+Func Leveler_GetSeitungMatNeeds(ByRef $a_ai_Models, ByRef $a_ai_Counts)
+	Local $l_ai_M[4]
+	Local $l_ai_C[4]
+	Local $l_i_Count = 0
 	Local $l_ai_Pieces = Leveler_GetSeitungPieces()
-	Local $l_i_Cloth = 0
-	Local $l_i_Hide = 0
-	Local $l_i_Dust = 0
+	Local $i
 	For $i = 0 To UBound($l_ai_Pieces) - 1
-		Switch $l_ai_Pieces[$i][1]
-			Case $GC_I_MODELID_CLOTHS
-				$l_i_Cloth += $l_ai_Pieces[$i][2]
-			Case $GC_I_MODELID_TANNED_HIDE
-				$l_i_Hide += $l_ai_Pieces[$i][2]
-			Case $GC_I_MODELID_DUST
-				$l_i_Dust += $l_ai_Pieces[$i][2]
-		EndSwitch
+		Leveler_AddMatNeed($l_ai_M, $l_ai_C, $l_i_Count, $l_ai_Pieces[$i][1], $l_ai_Pieces[$i][2])
 	Next
-	; Inventory only — Merchant_CraftItem needs the mats in bags, not storage.
-	If $l_i_Cloth > 0 Then
-		If Not Leveler_BuyMaterialShortfallInv($GC_I_MODELID_CLOTHS, $l_i_Cloth) Then Return False
+	If $l_i_Count = 0 Then
+		Local $l_ai_Empty[0]
+		$a_ai_Models = $l_ai_Empty
+		$a_ai_Counts = $l_ai_Empty
+		Return
 	EndIf
-	If $l_i_Hide > 0 Then
-		If Not Leveler_BuyMaterialShortfallInv($GC_I_MODELID_TANNED_HIDE, $l_i_Hide) Then Return False
-	EndIf
-	If $l_i_Dust > 0 Then
-		If Not Leveler_BuyMaterialShortfallInv($GC_I_MODELID_DUST, $l_i_Dust) Then Return False
-	EndIf
+	ReDim $l_ai_M[$l_i_Count]
+	ReDim $l_ai_C[$l_i_Count]
+	$a_ai_Models = $l_ai_M
+	$a_ai_Counts = $l_ai_C
+EndFunc
+
+; Buy only the Seitung mats that are still missing after storage is emptied into bags.
+Func Leveler_BuySeitungMaterials()
+	Local $l_ai_Models, $l_ai_Counts
+	Leveler_GetSeitungMatNeeds($l_ai_Models, $l_ai_Counts)
+	If Not IsArray($l_ai_Models) Then Return True
+	Local $i
+	For $i = 0 To UBound($l_ai_Models) - 1
+		If Not Leveler_BuyMaterialShortfallInv($l_ai_Models[$i], $l_ai_Counts[$i]) Then Return False
+	Next
 	Return True
 EndFunc
 
 ; True when bags already hold the Seitung craft mats.
 Func Leveler_SeitungMaterialsReady()
-	Local $l_ai_Pieces = Leveler_GetSeitungPieces()
-	Local $l_i_Cloth = 0
-	Local $l_i_Hide = 0
-	Local $l_i_Dust = 0
-	For $i = 0 To UBound($l_ai_Pieces) - 1
-		Switch $l_ai_Pieces[$i][1]
-			Case $GC_I_MODELID_CLOTHS
-				$l_i_Cloth += $l_ai_Pieces[$i][2]
-			Case $GC_I_MODELID_TANNED_HIDE
-				$l_i_Hide += $l_ai_Pieces[$i][2]
-			Case $GC_I_MODELID_DUST
-				$l_i_Dust += $l_ai_Pieces[$i][2]
-		EndSwitch
+	Local $l_ai_Models, $l_ai_Counts
+	Leveler_GetSeitungMatNeeds($l_ai_Models, $l_ai_Counts)
+	If Not IsArray($l_ai_Models) Then Return True
+	Local $i
+	For $i = 0 To UBound($l_ai_Models) - 1
+		If Leveler_CountModel($l_ai_Models[$i], False) < $l_ai_Counts[$i] Then Return False
 	Next
-	If $l_i_Cloth > 0 And Leveler_CountModel($GC_I_MODELID_CLOTHS, False) < $l_i_Cloth Then Return False
-	If $l_i_Hide > 0 And Leveler_CountModel($GC_I_MODELID_TANNED_HIDE, False) < $l_i_Hide Then Return False
-	If $l_i_Dust > 0 And Leveler_CountModel($GC_I_MODELID_DUST, False) < $l_i_Dust Then Return False
 	Return True
 EndFunc
 
@@ -966,12 +1006,16 @@ Func Leveler_WaitForMaterialOffer($a_i_Model, $a_i_Timeout = 8000)
 	Return False
 EndFunc
 
-; Buy the missing count into bags only (not storage).
+; Buy the bag shortfall. Stored mats are withdrawn before the trader is paid.
 Func Leveler_BuyMaterialShortfallInv($a_i_Model, $a_i_Need)
 	Local $l_i_Have = Leveler_CountModel($a_i_Model, False)
 	If $l_i_Have >= $a_i_Need Then
 		Out("[Craft] Inventory already has " & $l_i_Have & "x model " & $a_i_Model)
 		Return True
+	EndIf
+	If Leveler_MaterialStorageOpen() Then
+		Local $l_i_Stored = Leveler_CountStorageModel($a_i_Model)
+		Out("[Craft] Model " & $a_i_Model & " still short in bags (" & $l_i_Have & "/" & $a_i_Need & "). Storage has " & $l_i_Stored & ".")
 	EndIf
 	If Leveler_WithdrawStorageModel($a_i_Model, $a_i_Need) Then
 		$l_i_Have = Leveler_CountModel($a_i_Model, False)
@@ -1223,28 +1267,45 @@ Func Leveler_GetMaxArmorMatNeeds($a_b_Common, ByRef $a_ai_Models, ByRef $a_ai_Co
 	$a_ai_Counts = $l_ai_C
 EndFunc
 
-; Buy the common or rare mats for Kaineng max armor.
+; Common and rare mats for the whole max-armor set.
+Func Leveler_GetAllMaxArmorMatNeeds(ByRef $a_ai_Models, ByRef $a_ai_Counts)
+	Local $l_ai_CommonM, $l_ai_CommonC, $l_ai_RareM, $l_ai_RareC
+	Leveler_GetMaxArmorMatNeeds(True, $l_ai_CommonM, $l_ai_CommonC)
+	Leveler_GetMaxArmorMatNeeds(False, $l_ai_RareM, $l_ai_RareC)
+	Local $l_ai_M[8]
+	Local $l_ai_C[8]
+	Local $l_i_Count = 0
+	Local $i
+	If IsArray($l_ai_CommonM) Then
+		For $i = 0 To UBound($l_ai_CommonM) - 1
+			Leveler_AddMatNeed($l_ai_M, $l_ai_C, $l_i_Count, $l_ai_CommonM[$i], $l_ai_CommonC[$i])
+		Next
+	EndIf
+	If IsArray($l_ai_RareM) Then
+		For $i = 0 To UBound($l_ai_RareM) - 1
+			Leveler_AddMatNeed($l_ai_M, $l_ai_C, $l_i_Count, $l_ai_RareM[$i], $l_ai_RareC[$i])
+		Next
+	EndIf
+	If $l_i_Count = 0 Then
+		Local $l_ai_Empty[0]
+		$a_ai_Models = $l_ai_Empty
+		$a_ai_Counts = $l_ai_Empty
+		Return
+	EndIf
+	ReDim $l_ai_M[$l_i_Count]
+	ReDim $l_ai_C[$l_i_Count]
+	$a_ai_Models = $l_ai_M
+	$a_ai_Counts = $l_ai_C
+EndFunc
+
+; Buy the common or rare mats still missing after storage was moved into bags.
 Func Leveler_BuyMaxArmorMaterials($a_b_Common)
 	Local $l_ai_Models, $l_ai_Counts
 	Leveler_GetMaxArmorMatNeeds($a_b_Common, $l_ai_Models, $l_ai_Counts)
+	If Not IsArray($l_ai_Models) Then Return True
+	Local $i
 	For $i = 0 To UBound($l_ai_Models) - 1
-		Local $l_i_Need = $l_ai_Counts[$i]
-		Local $l_i_Have = Leveler_CountModel($l_ai_Models[$i], False)
-		Local $l_i_Short = $l_i_Need - $l_i_Have
-		If $l_i_Short <= 0 Then
-			Out("[Craft] Inventory already has " & $l_i_Have & "x model " & $l_ai_Models[$i])
-			ContinueLoop
-		EndIf
-		Local $l_i_Buy = $l_i_Short
-		If $a_b_Common Then $l_i_Buy = Int(($l_i_Short + 9) / 10)
-		Out("[Craft] Buying " & $l_i_Buy & " trader lot(s) of model " & $l_ai_Models[$i] & " (need " & $l_i_Need & ")")
-		If Not Merchant_BuyItem($l_ai_Models[$i], $l_i_Buy, True) Then
-			If Not Merchant_BuyItem($l_ai_Models[$i], $l_i_Short, False) Then
-				Out("[Craft] Failed to buy material " & $l_ai_Models[$i])
-				Return False
-			EndIf
-		EndIf
-		Sleep(600)
+		If Not Leveler_BuyMaterialShortfallInv($l_ai_Models[$i], $l_ai_Counts[$i]) Then Return False
 	Next
 	Return True
 EndFunc

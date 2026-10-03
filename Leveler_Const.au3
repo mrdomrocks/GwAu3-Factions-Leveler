@@ -486,6 +486,11 @@ Global $g_b_OliasUnlocked = False
 Global $g_b_MoxUnlocked = False
 ; Sticky after this character pays the Xunlai agent. Not the same as account Storage1Ptr.
 Global $g_b_XunlaiUnlocked = False
+; The 50g purchase dialogs are sent once per run. A later pass must not buy storage again.
+Global $g_b_XunlaiPurchaseSent = False
+Global $g_i_XunlaiGoldBefore = -1
+; Map where the chest window was opened, so crafting does not talk to the agent again.
+Global $g_i_XunlaiOpenedMap = 0
 ; Sticky after GToB trainer dialogs.
 Global $g_b_SecondaryProfsTalked = False
 #EndRegion Runtime State
