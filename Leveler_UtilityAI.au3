@@ -32,12 +32,22 @@ Func Leveler_UAI_RefreshSkillCache()
 		EndIf
 	Next
 
-	If $l_b_BarChanged Then
+	; Same skill IDs as the previous map still need a new cache. Entering Zen Daijun
+	; keeps the Seitung bar, so a bar-change check never calls Cache_SkillBar.
+	Local $l_i_Map = Map_GetMapID()
+	Local $l_b_NeedCache = $l_b_BarChanged Or Not $g_b_UAIReady Or $g_i_LastUAIMap <> $l_i_Map
+	If $l_b_NeedCache Then
 		If Not Leveler_CacheSkillBarNow() Then Return False
 		If Not Leveler_RebindSkillbarPtr() Then Return False
 		$l_p_Bar = $g_p_StaticSkillbarPtr
+		$g_i_LastUAIMap = $l_i_Map
+		$g_b_UAIReady = True
 		If $g_b_KilroyMode Or $g_b_FarmMode Or Leveler_IsPunchoutMap() Then Leveler_ResolveKilroySlotsFromCache()
-		Out("[Combat] Skill bar changed. UtilityAI skill cache rebuilt.")
+		If $l_b_BarChanged Then
+			Out("[Combat] Skill bar changed. UtilityAI skill cache rebuilt.")
+		Else
+			Out("[Combat] UtilityAI skill bar cached on map " & $l_i_Map)
+		EndIf
 	EndIf
 
 	For $i = 1 To 8
@@ -109,6 +119,8 @@ EndFunc
 
 ; One pass of the bar. Skills fire before auto-attack.
 Func Leveler_UAI_UseSkills($a_f_x, $a_f_y, $a_f_AggroRange = 1320, $a_f_MaxDistanceToXY = 3500)
+	; Empty static slots used to skip the refresh, so a missed entry cache never recovered.
+	If Not Leveler_UAI_RefreshSkillCache() Then Return False
 	For $skillSlot = 1 To 8
 		If UAI_GetStaticSkillInfo($skillSlot, $GC_UAI_STATIC_SKILL_SkillID) = 0 Then ContinueLoop
 		If $g_b_SkillChanged = True And Cache_EndFormChangeBuild($skillSlot) Then $g_b_SkillChanged = False

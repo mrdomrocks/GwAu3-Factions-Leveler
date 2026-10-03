@@ -807,7 +807,8 @@ Func Leveler_Step_ChosMission()
 	EndIf
 	If Not Leveler_WaitUntilMapReady() Then Return False
 	Leveler_EnsurePathfinder()
-	If Not Leveler_PrepareCombatAI() Then Return False
+	; Cho keeps the outpost map id. Cache only after the instance is explorable.
+	If Not Leveler_CacheUtilityAIForMap(Map_GetMapID()) Then Return False
 	If Leveler_IsWiped() Then Return False
 
 	If Not Leveler_MoveTo(6220.76, -7360.73, True) Then Return False
@@ -1062,8 +1063,8 @@ Func Leveler_CompleteLostTreasureAtNem()
 	If Not Leveler_WaitUntilMapReady() Then Return False
 	If Not Leveler_EquipTrainerSkills(False) Then Return False
 	Sleep(2000)
-	$g_b_UAIReady = False
-	If Not Leveler_PrepareCombatAI() Then Return False
+	; The trainer bar just changed. The cache from map entry is for the previous bar.
+	If Not Leveler_CacheUtilityAIForMap(Map_GetMapID()) Then Return False
 
 	Local $l_b_PastStart = Agent_GetDistanceToXY($LOST_CHO_START_X, $LOST_CHO_START_Y) > 3500
 	Local $l_i_Nem = Leveler_GetAgentByModel($MODEL_LOST_TREASURE_GUARD)
@@ -1179,7 +1180,7 @@ Func Leveler_RunRanMusuToTenguHandIn()
 	If Leveler_ShouldResumeExplorable($QUEST_WARNING_TENGU) Then
 		Out("[Path] Warning the Tengu is in the log and map " & Map_GetMapID() & " is not an outpost. Resuming from here.")
 		If Map_GetMapID() = $MAP_KINYA Then
-			If Not Leveler_PrepareCombatAI() Then Return False
+			If Not Leveler_CacheUtilityAIForMap($MAP_KINYA) Then Return False
 			If Not Leveler_UpdateTenguAtSoar() Then Return False
 			If Not Leveler_WalkPoint($TENGU_AFFLICTED_X, $TENGU_AFFLICTED_Y, True, "Afflicted") Then Return False
 			If Not Leveler_WaitOutOfCombat() Then Return False
@@ -1213,8 +1214,7 @@ Func Leveler_RunRanMusuToTenguHandIn()
 	If Not Leveler_WaitUntilMapReady() Then Return False
 	If Not Leveler_EquipTrainerSkills(False) Then Return False
 	Sleep(1500)
-	$g_b_UAIReady = False
-	If Not Leveler_PrepareCombatAI() Then Return False
+	If Not Leveler_CacheUtilityAIForMap($MAP_KINYA) Then Return False
 
 	If Not Leveler_WalkPoint($TENGU_KINYA_START_X, $TENGU_KINYA_START_Y, True, "Kinya start") Then Return False
 	If Not Leveler_UpdateTenguAtSoar() Then Return False
@@ -1602,7 +1602,8 @@ Func Leveler_Step_ZenDaijunMission()
 	EndIf
 	If Not Leveler_WaitUntilMapReady() Then Return False
 	Leveler_EnsurePathfinder()
-	If Not Leveler_PrepareCombatAI() Then Return False
+	; Zen can load as 213, 246, or 258. Cache whichever instance is actually explorable.
+	If Not Leveler_CacheUtilityAIForMap(Map_GetMapID()) Then Return False
 	If Leveler_IsWiped() Then Return False
 
 	$g_b_SpiritRiftWatch = True
@@ -1997,7 +1998,7 @@ Func Leveler_Step_AMastersBurden()
 	EndIf
 
 	If Not Leveler_WaitUntilMapReady() Then Return False
-	If Not Leveler_PrepareCombatAI() Then Return False
+	If Not Leveler_CacheUtilityAIForMap($MAP_WAJJUN) Then Return False
 
 	If Not Leveler_MoveTo(10033.88, 13838.59, True) Then Return False
 	If Not Leveler_MoveTo(11637.23, 11837.92, True) Then Return False
@@ -2112,6 +2113,10 @@ Func Leveler_Step_ToBorealStation()
 		If Map_GetMapID() <> $MAP_TUNNELS Then
 			If Not Map_WaitMapLoading($MAP_TUNNELS, -1, 45000) Then Return False
 		EndIf
+	EndIf
+
+	If Map_GetMapID() = $MAP_TUNNELS Then
+		If Not Leveler_WaitUntilMapReady() Then Return False
 	EndIf
 
 	If Not Leveler_MoveTo(16738.77, 3046.05, True) Then Return False
@@ -2667,7 +2672,12 @@ Func Leveler_Step_AnUnwelcomeGuest()
 		If Not Leveler_WaitForMap($MAP_ZEN_EXP, 30000) Then Return False
 	EndIf
 
-	Leveler_EquipSkillBar()
+	; PrepareForBattle caches in Seitung Harbor. Cache_SkillBar refuses an outpost, so that
+	; call returns without binding CanUse. The new Zen Daijun instance has to be cached
+	; after it is explorable, or the fight walks in with an empty skill cache.
+	If Not Leveler_WaitUntilMapReady() Then Return False
+	Out("[Step] Zen Daijun explorable. Caching UtilityAI for An Unwelcome Guest.")
+	If Not Leveler_CacheUtilityAIForMap($MAP_ZEN_EXP) Then Return False
 	$g_b_CombatMode = True
 	Local $l_af_Out[11][2] = [ _
 			[-13959.50, 6375.26], _
