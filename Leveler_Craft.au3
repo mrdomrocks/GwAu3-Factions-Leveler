@@ -188,28 +188,37 @@ Func Leveler_WithdrawStorageModel($a_i_Model, $a_i_Need)
 	Return $l_i_Have >= $a_i_Need
 EndFunc
 
-; Open the chest once, then move stored mats into bags before any trader buy.
-Func Leveler_WithdrawCraftMaterials(ByRef $a_ai_Models, ByRef $a_ai_Counts)
+; Open the chest, move stored mats into bags, and pull storage gold for the buys that remain.
+; $a_i_GoldNeed is how much character gold the craft should have after the check.
+Func Leveler_WithdrawCraftMaterials(ByRef $a_ai_Models, ByRef $a_ai_Counts, $a_i_GoldNeed = 0)
 	If Not IsArray($a_ai_Models) Then Return False
-	If UBound($a_ai_Models) = 0 Then Return True
 	Local $l_b_Short = False
 	Local $i
-	For $i = 0 To UBound($a_ai_Models) - 1
-		If Leveler_CountModel($a_ai_Models[$i], False) < $a_ai_Counts[$i] Then
-			$l_b_Short = True
-			ExitLoop
-		EndIf
-	Next
-	If Not $l_b_Short Then Return True
-	If Not Leveler_MaterialStorageOpen() Then
-		If Not Leveler_OpenXunlaiStorage() Then Return False
+	If UBound($a_ai_Models) > 0 Then
+		For $i = 0 To UBound($a_ai_Models) - 1
+			If Leveler_CountModel($a_ai_Models[$i], False) < $a_ai_Counts[$i] Then
+				$l_b_Short = True
+				ExitLoop
+			EndIf
+		Next
 	EndIf
-	For $i = 0 To UBound($a_ai_Models) - 1
-		Local $l_i_Stored = Leveler_CountStorageModel($a_ai_Models[$i])
-		Local $l_i_Bags = Leveler_CountModel($a_ai_Models[$i], False)
-		Out("[Craft] Model " & $a_ai_Models[$i] & " before buy: bags " & $l_i_Bags & ", storage " & $l_i_Stored & ", need " & $a_ai_Counts[$i])
-		Leveler_WithdrawStorageModel($a_ai_Models[$i], $a_ai_Counts[$i])
-	Next
+	; Bags can already hold the mats. Open anyway so GoldStorage is readable.
+	If Not Leveler_MaterialStorageOpen() Then
+		If Not Leveler_OpenXunlaiStorage() Then
+			Out("[Craft] Could not open Xunlai while checking materials. Storage gold was not read.")
+			If $l_b_Short Then Return False
+		EndIf
+	EndIf
+	Out("[Craft] Material check gold: character " & Item_GetInventoryInfo("GoldCharacter") & ", storage " & Item_GetInventoryInfo("GoldStorage"))
+	If $l_b_Short Then
+		For $i = 0 To UBound($a_ai_Models) - 1
+			Local $l_i_Stored = Leveler_CountStorageModel($a_ai_Models[$i])
+			Local $l_i_Bags = Leveler_CountModel($a_ai_Models[$i], False)
+			Out("[Craft] Model " & $a_ai_Models[$i] & " before buy: bags " & $l_i_Bags & ", storage " & $l_i_Stored & ", need " & $a_ai_Counts[$i])
+			Leveler_WithdrawStorageModel($a_ai_Models[$i], $a_ai_Counts[$i])
+		Next
+	EndIf
+	If $a_i_GoldNeed > 0 Then Leveler_EnsureCharacterGold($a_i_GoldNeed)
 	Return True
 EndFunc
 
@@ -1025,7 +1034,10 @@ Func Leveler_BuyMaterialShortfallInv($a_i_Model, $a_i_Need)
 		EndIf
 	EndIf
 	$l_i_Have = Leveler_CountModel($a_i_Model, False)
-	Out("[Craft] Need " & $a_i_Need & "x model " & $a_i_Model & " (have " & $l_i_Have & ", gold " & Item_GetInventoryInfo("GoldCharacter") & ", storage gold " & Item_GetInventoryInfo("GoldStorage") & ")")
+	Local $l_i_CharGold = Item_GetInventoryInfo("GoldCharacter")
+	Local $l_i_StoreGold = Item_GetInventoryInfo("GoldStorage")
+	Out("[Craft] Need " & $a_i_Need & "x model " & $a_i_Model & " (have " & $l_i_Have & ", gold " & $l_i_CharGold & ", storage gold " & $l_i_StoreGold & ")")
+	If $l_i_StoreGold > 0 And $l_i_CharGold < $WEAPON_WITHDRAW_GOLD Then Leveler_EnsureCharacterGold($WEAPON_WITHDRAW_GOLD)
 	If Not Leveler_WaitForMaterialOffer($a_i_Model) Then Return False
 	While $l_i_Have < $a_i_Need
 		If $g_b_LevelerPaused Then Return False

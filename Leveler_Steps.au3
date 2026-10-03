@@ -550,7 +550,7 @@ Func Leveler_Step_CraftMonasteryArmor()
 	Leveler_SetPacifist()
 	Local $l_ai_MatModels, $l_ai_MatCounts
 	Leveler_GetArmorBuyList($l_ai_MatModels, $l_ai_MatCounts)
-	Leveler_WithdrawCraftMaterials($l_ai_MatModels, $l_ai_MatCounts)
+	Leveler_WithdrawCraftMaterials($l_ai_MatModels, $l_ai_MatCounts, $WEAPON_WITHDRAW_GOLD)
 	If Not Leveler_MaterialsInBags($l_ai_MatModels, $l_ai_MatCounts) Then
 		If Not Leveler_MoveTo(-10896.94, 10807.54, False) Then Return False
 		If Not Leveler_InteractNpcAt(-10614.00, 10996.00, False) Then Return False
@@ -1564,14 +1564,12 @@ Func Leveler_Step_CraftSeitungArmor()
 	; Storage first. The trader is only for what the chest did not cover.
 	Local $l_ai_MatModels, $l_ai_MatCounts
 	Leveler_GetSeitungMatNeeds($l_ai_MatModels, $l_ai_MatCounts)
-	Leveler_WithdrawCraftMaterials($l_ai_MatModels, $l_ai_MatCounts)
+	Leveler_WithdrawCraftMaterials($l_ai_MatModels, $l_ai_MatCounts, 15000)
 	; Buy Seitung mats at the Shing Jea common-material trader, then craft in Seitung.
 	If Not Leveler_SeitungMaterialsReady() Then
 		If Not Leveler_Travel($MAP_SHING_JEA) Then Return False
 		Leveler_SetPacifist()
-		Item_WithdrawGold(15000)
-		Sleep(400)
-		Out("[Craft] Gold after withdraw: " & Item_GetInventoryInfo("GoldCharacter"))
+		Out("[Craft] Gold after storage check: " & Item_GetInventoryInfo("GoldCharacter"))
 		If Not Leveler_MoveTo(-10896.94, 10807.54, False) Then Return False
 		If Not Leveler_InteractNpcAt(-10614.00, 10996.00, False) Then Return False
 		Sleep(800)
@@ -1900,10 +1898,8 @@ Func Leveler_Step_CraftMaxArmor()
 	If Not Leveler_InterruptSkillsUnlocked() Then Leveler_BuyKainengInterrupts()
 	Local $l_ai_MatModels, $l_ai_MatCounts
 	Leveler_GetAllMaxArmorMatNeeds($l_ai_MatModels, $l_ai_MatCounts)
-	Leveler_WithdrawCraftMaterials($l_ai_MatModels, $l_ai_MatCounts)
-	Item_WithdrawGold(20000)
-	Sleep(400)
-	Out("[Craft] Gold after withdraw: " & Item_GetInventoryInfo("GoldCharacter"))
+	Leveler_WithdrawCraftMaterials($l_ai_MatModels, $l_ai_MatCounts, 20000)
+	Out("[Craft] Gold after storage check: " & Item_GetInventoryInfo("GoldCharacter"))
 	Local $l_ai_CommonM, $l_ai_CommonC
 	Leveler_GetMaxArmorMatNeeds(True, $l_ai_CommonM, $l_ai_CommonC)
 	If Not Leveler_MaterialsInBags($l_ai_CommonM, $l_ai_CommonC) Then
